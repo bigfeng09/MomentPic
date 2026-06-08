@@ -13,6 +13,8 @@ npm run smoke
 
 Edit `.env` before running with real data. Do not commit `.env`.
 
+Open `http://127.0.0.1:3211/` for the built-in Web UI. It supports login, album browsing, image viewing, favorite albums and public share creation without a frontend build step.
+
 ## Scripts
 
 - `npm run dev`: start TypeScript watch mode.

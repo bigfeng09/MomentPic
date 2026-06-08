@@ -76,6 +76,14 @@ Expected response contains:
 {"status":"ok","version":"v2"}
 ```
 
+The built-in Web UI is served from:
+
+```bash
+curl http://127.0.0.1:3211/
+```
+
+Open `http://<server-ip>:3211/` in a browser, then log in with the configured admin account.
+
 Stop/restart:
 
 ```bash
@@ -130,12 +138,16 @@ npm run smoke
 Manual HTTP checks:
 
 ```bash
+curl http://127.0.0.1:3211/
 curl http://127.0.0.1:3211/api/v2/health
-curl -i -H 'Content-Type: application/json'   -d '{"username":"admin","password":"<password>"}'   http://127.0.0.1:3211/api/v2/auth/login
+curl -i -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<password>"}' \
+  http://127.0.0.1:3211/api/v2/auth/login
 ```
 
 ## Operational notes
 
+- The backend serves a no-build Web UI at `/` for login, album browsing, image viewing, favorite albums, and public share creation.
 - ZIP/CBZ archives are supported by built-in code.
 - RAR/7z/CBR/CB7 return explicit unsupported responses unless external extractor support is added.
 - Scan endpoints are safe dry-run/status endpoints in this release.

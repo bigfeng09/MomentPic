@@ -13,6 +13,7 @@ import { galleryRoutes } from "./routes/galleries.js";
 import { healthRoutes } from "./routes/health.js";
 import { scanRoutes } from "./routes/scan.js";
 import { shareRoutes } from "./routes/shares.js";
+import { getWebAppHtml } from "./web-app.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -45,6 +46,10 @@ export const buildApp = async (overrides: Partial<AppConfig> = {}): Promise<Fast
 
   app.addHook("onClose", async () => {
     db.close();
+  });
+
+  app.get("/", async (_request, reply) => {
+    return reply.type("text/html; charset=utf-8").send(getWebAppHtml());
   });
 
   await app.register(healthRoutes);

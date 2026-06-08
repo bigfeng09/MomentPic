@@ -53,6 +53,8 @@ Default exposed URL:
 http://<server-ip>:3211
 ```
 
+The backend serves the built-in Web UI at `/`, so the same URL opens the browser app after login.
+
 For more backend deployment detail, see `backend-v2/docs/DEPLOYMENT.md`.
 
 ## Quick start: backend for development

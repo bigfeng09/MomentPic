@@ -39,6 +39,17 @@ const app = await buildApp({
 const health = await app.inject({ method: "GET", url: "/api/v2/health" });
 if (health.statusCode !== 200) throw new Error(`health failed: ${health.statusCode}`);
 
+const webRoot = await app.inject({ method: "GET", url: "/" });
+if (
+  webRoot.statusCode !== 200 ||
+  !String(webRoot.headers["content-type"]).includes("text/html") ||
+  !webRoot.body.includes('id="login-screen"') ||
+  !webRoot.body.includes('id="album-grid"') ||
+  !webRoot.body.includes("/api/v2/auth/login")
+) {
+  throw new Error(`web root smoke failed: ${webRoot.statusCode} ${webRoot.body.slice(0, 160)}`);
+}
+
 const rejected = await app.inject({ method: "GET", url: "/api/v2/galleries" });
 if (rejected.statusCode !== 401) throw new Error(`expected auth guard, got ${rejected.statusCode}`);
 
