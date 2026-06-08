@@ -1,5 +1,11 @@
 # MomentPic V2
 
+> **AI 生成/辅助开发声明与责任说明**
+>
+> 本项目主要由 AI 助手在用户指导下完成、生成、重构和部署验证，包含对原 MomentPic 使用场景、数据结构和迁移需求的延续说明。代码、文档、迁移脚本、部署模板和客户端实现都可能存在缺陷、遗漏或不适合你的环境之处。使用者应在使用、部署、迁移或二次开发前自行审查代码、测试功能、备份数据并承担相应风险。
+>
+> 本项目涉及自托管相册、SQLite 数据库、媒体文件读取、用户权限、公开分享 token、文件系统扫描导入和 Android 客户端连接。生产环境使用前，必须备份旧库和新库、修改所有默认密码和密钥、验证媒体目录权限、核对路径映射和扫描根目录配置，并确认公开分享和普通用户授权符合你的隐私要求。作者/维护者不对数据丢失、隐私泄露、误配置、误扫描、第三方部署环境问题或由本项目使用造成的其他损失承担责任。
+
 MomentPic V2 是一个自托管相册与图片库项目，包含 Node.js 后端、内置 Web 管理界面和 Android 客户端源码。它基于原 MomentPic 的使用场景、数据结构和迁移需求继续开发，目标是在保留旧图库/相册/资源/用户授权关系的基础上，提供更安全、更容易部署和维护的新版本。
 
 > 本仓库是对外发布用的脱敏源码仓库，只包含源码、Docker/部署模板和说明文档。不包含私有数据库、媒体文件、`.env`、Android 签名文件、APK/AAB、备份包或任何真实密钥。
@@ -131,7 +137,30 @@ docker build -t momentpic-backend-v2:local .
 
 如果使用仓库内 `backend-v2/docker-compose.yml`，请按自己的服务器情况修改 `.env`、媒体挂载路径和 `MOMENTPIC_LIBRARY_ALLOWED_ROOTS`，不要直接使用私有环境里的路径。
 
-## Android 构建与使用
+## Android App 下载
+
+本仓库默认提供 Android 源码，不把 APK 直接提交到源码树。
+
+获取 debug APK 的推荐方式：
+
+1. 在 GitHub 仓库页面打开 Actions，手动运行 Android debug APK workflow，完成后从构建产物 `MomentPicAndroid-debug-apk` 下载。
+2. 如果维护者发布了 GitHub Release，也可以从 Releases 下载对应 APK。
+3. 也可以自己 clone 仓库后本地构建：
+
+```bash
+cd android
+./gradlew :app:assembleDebug
+```
+
+构建产物位于：
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+debug APK 未经应用商店审核，也不是正式发布签名包。安装和使用前，请自行确认 APK 来源、安全性、后端服务地址、网络环境和服务端权限配置。
+
+## Android 源码构建与使用
 
 准备 Android SDK 和 JDK 后：
 
