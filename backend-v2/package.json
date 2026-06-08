@@ -1,0 +1,37 @@
+{
+  "name": "@moment-pic/backend-v2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/src/index.js",
+    "migrate": "npm run build --silent && node dist/src/db/migrate.js",
+    "seed": "npm run build --silent && node dist/src/db/seed.js",
+    "smoke": "npm run build && node dist/scripts/smoke.js",
+    "import:legacy": "npm run build --silent && node dist/scripts/import-legacy-db.js",
+    "import:legacy:test": "npm run build --silent && node dist/scripts/legacy-import-test.js",
+    "preflight:main-import": "npm run build --silent && node dist/scripts/preflight-main-import.js",
+    "verify:legacy": "npm run build --silent && node dist/scripts/verify-legacy-db.js",
+    "check:path-mapping": "npm run build --silent && node dist/scripts/check-path-mapping.js",
+    "check:archive-samples": "npm run build --silent && node dist/scripts/check-archive-samples.js"
+  },
+  "dependencies": {
+    "fastify": "^5.2.1",
+    "sharp": "^0.34.5",
+    "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/yauzl": "^3.3.0",
+    "@types/yazl": "^3.3.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3",
+    "yazl": "^3.3.1"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

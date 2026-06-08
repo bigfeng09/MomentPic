@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Backend build/runtime output
+backend-v2/dist/
+backend-v2/data/*
+!backend-v2/data/.gitkeep
+backend-v2/logs/
+backend-v2/*.pid
+
+# Android build/runtime output
+android/.gradle/
+android/.gradle-home/
+android/.gradle_user_home/
+android/.android-home/
+android/build/
+android/app/build/
+android/local.properties
+
+# Secrets and local config
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+**/*secret*
+**/*secrets*
+**/*.keystore
+**/*.jks
+**/google-services.json
+**/google-services.xml
+
+# Archives, databases, packages
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.apk
+*.ap_
+*.aab
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# IDE/log/temp
+.idea/
+*.iml
+*.log
+tmp/
+temp/

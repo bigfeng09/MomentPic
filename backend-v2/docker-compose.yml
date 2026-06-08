@@ -1,0 +1,24 @@
+services:
+  moment-pic-v2:
+    build:
+      context: .
+    image: moment-pic-v2:${MOMENTPIC_IMAGE_TAG:-20260608-local}
+    container_name: moment-pic-v2
+    restart: unless-stopped
+    network_mode: bridge
+    env_file:
+      - path: ./.env
+        required: false
+    ports:
+      - "3211:3211"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3211"
+      MOMENTPIC_DB_PATH: "/app/data/momentpic-v2.sqlite"
+      MOMENTPIC_SEED_DEMO: "false"
+      MOMENTPIC_PATH_PREFIX_MAP: '[]'
+      MOMENTPIC_THUMBNAIL_CACHE_DIR: "/app/data/thumbnails"
+    volumes:
+      - ./data:/app/data
+      # Optional: mount imported media read-only and set MOMENTPIC_PATH_PREFIX_MAP in .env.
+      # - /path/to/media:/media:ro
