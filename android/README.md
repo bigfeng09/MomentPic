@@ -16,7 +16,7 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## Usage
 
-Install the APK and open it. The default service URL is the LAN BackendV2 instance:
+Install the APK and open it. The default service URL is the Android emulator host loopback:
 
 ```text
 http://10.0.2.2:3211
@@ -35,7 +35,12 @@ In the full-screen image viewer, the image operation menu supports:
 
 Normal-account sharing is always album-level. The app does not create private per-asset grants; if the viewer cannot determine a real album, it asks the user to open the image from its album.
 
-In Settings, admin users can add an album library directory by entering a server-side absolute path such as `/example/photos`.
+Settings now keeps connection and appearance options on the main page, with two peer entries:
+
+- Account management: admin-only; creates/updates/deletes normal accounts and manages album sharing. Non-admin users see an explicit permission notice.
+- Data management: contains album library directory registration, registered gallery source list, source enable/disable, `dryRun=true` scan preview, image cache clearing, and search history clearing. Source management is admin-only; non-admin users see an explicit permission notice while local cleanup remains available.
+
+Admin users can add an album library directory by entering a server-side absolute path such as `/app/media/photos`.
 This path is submitted to BackendV2 as a library root; it is not an Android local folder picker.
 Admins can enable or disable registered sources and run a `dryRun=true` scan preview from Android.
 Android does not expose `dryRun=false` real import in this build.

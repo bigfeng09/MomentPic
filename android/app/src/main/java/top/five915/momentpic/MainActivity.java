@@ -120,6 +120,7 @@ public class MainActivity extends Activity {
     private static final String SCREEN_ASSETS = "assets";
     private static final String SCREEN_VIEWER = "viewer";
     private static final String SCREEN_SETTINGS = "settings";
+    private static final String SCREEN_DATA_MANAGER = "data_manager";
     private static final String SCREEN_USER_MANAGER = "user_manager";
     private static final String SCREEN_ACCOUNT_DETAIL = "account_detail";
 
@@ -272,6 +273,8 @@ public class MainActivity extends Activity {
             showAccountShareDetail(currentAccountDetailUser);
         } else if (SCREEN_USER_MANAGER.equals(currentScreen)) {
             showUserShareManager();
+        } else if (SCREEN_DATA_MANAGER.equals(currentScreen)) {
+            showDataManager();
         } else if (SCREEN_SETTINGS.equals(currentScreen)) {
             showSettings();
         } else if (SCREEN_ALBUMS.equals(currentScreen)) {
@@ -305,7 +308,7 @@ public class MainActivity extends Activity {
 
         EditText urlInput = input("服务地址", baseUrl);
         EditText userInput = input("账号", username);
-        EditText passInput = input("密码", "change-me-admin-password");
+        EditText passInput = input("密码", "");
         passInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
         page.addView(urlInput, inputParams());
         page.addView(userInput, inputParams());
@@ -431,25 +434,66 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams darkParams = matchWrapWithTop(12);
         content.addView(darkRow, darkParams);
 
-        TextView dataTitle = text("数据管理", 18, colorText(), true);
-        LinearLayout.LayoutParams dataTitleParams = matchWrapWithTop(26);
-        content.addView(dataTitle, dataTitleParams);
+        TextView manageTitle = text("管理", 18, colorText(), true);
+        LinearLayout.LayoutParams manageTitleParams = matchWrapWithTop(26);
+        content.addView(manageTitle, manageTitleParams);
+
+        LinearLayout manageRow = new LinearLayout(this);
+        manageRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button accountManage = secondaryButton("账户管理");
+        accountManage.setOnClickListener(v -> {
+            if ("admin".equals(role)) new LoadUsersTask(false, () -> showUserShareManager()).execute();
+            else showUserShareManager();
+        });
+        manageRow.addView(accountManage, new LinearLayout.LayoutParams(0, dp(50), 1));
+        Button dataManage = secondaryButton("数据管理");
+        dataManage.setOnClickListener(v -> showDataManager());
+        LinearLayout.LayoutParams dataManageParams = new LinearLayout.LayoutParams(0, dp(50), 1);
+        dataManageParams.setMargins(dp(10), 0, 0, 0);
+        manageRow.addView(dataManage, dataManageParams);
+        content.addView(manageRow, matchWrapWithTop(12));
+
+        Button logout = secondaryButton("退出登录");
+        logout.setTextColor(colorFavorite());
+        logout.setOnClickListener(v -> showLogin());
+        LinearLayout.LayoutParams logoutParams = matchWrapWithTop(24);
+        logoutParams.height = dp(46);
+        content.addView(logout, logoutParams);
+
+        page.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        root.addView(page, fullScreen());
+    }
+
+    private void showDataManager() {
+        currentScreen = SCREEN_DATA_MANAGER;
+        viewerOpen = false;
+        restoreSystemBars();
+        root.removeAllViews();
+
+        LinearLayout page = basePage();
+        page.addView(topBar("数据管理", () -> showSettings(), null));
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(18), dp(8), dp(18), navigationBarHeight() + dp(24));
+        scroll.addView(content);
 
         if ("admin".equals(role)) {
-            TextView libraryTitle = text("相册库目录", 16, colorText(), true);
-            content.addView(libraryTitle, matchWrapWithTop(12));
+            TextView libraryTitle = text("相册库目录", 18, colorText(), true);
+            content.addView(libraryTitle, matchWrap());
             TextView libraryHint = text("这里填写的是后端/Unraid 服务器上的绝对路径，不是手机本地目录。新增后只登记目录；真实导入或扫描能力以服务端为准。", 12, colorMuted(), false);
             libraryHint.setLineSpacing(dp(3), 1f);
             content.addView(libraryHint, matchWrapWithTop(8));
             EditText libraryNameInput = input("目录名称（可选）", "");
-            EditText libraryPathInput = input("服务器目录路径，例如 /example/photos", "");
+            EditText libraryPathInput = input("服务器目录路径，例如 /app/media/photos", "");
             LinearLayout.LayoutParams libraryNameParams = matchWrapWithTop(10);
             libraryNameParams.height = dp(50);
             content.addView(libraryNameInput, libraryNameParams);
             LinearLayout.LayoutParams libraryPathParams = matchWrapWithTop(10);
             libraryPathParams.height = dp(50);
             content.addView(libraryPathInput, libraryPathParams);
-            Button addLibrary = primaryButton("添加相册库目录");
+            Button addLibrary = primaryButton("添加来源目录");
             addLibrary.setOnClickListener(v -> {
                 String libraryName = libraryNameInput.getText().toString().trim();
                 String libraryPath = libraryPathInput.getText().toString().trim();
@@ -458,14 +502,14 @@ public class MainActivity extends Activity {
                     return;
                 }
                 if (!isServerAbsolutePath(libraryPath)) {
-                    toast("请输入服务端绝对路径，例如 /example/photos");
+                    toast("请输入服务端绝对路径，例如 /app/media/photos");
                     return;
                 }
                 addLibrary.setEnabled(false);
                 addLibrary.setText("添加中...");
                 new AddGalleryRootTask(libraryName, libraryPath, source -> {
                     addLibrary.setEnabled(true);
-                    addLibrary.setText("添加相册库目录");
+                    addLibrary.setText("添加来源目录");
                     if (source != null) {
                         libraryNameInput.setText("");
                         libraryPathInput.setText("");
@@ -478,8 +522,8 @@ public class MainActivity extends Activity {
             addLibraryParams.height = dp(46);
             content.addView(addLibrary, addLibraryParams);
 
-            TextView rootsTitle = text("已登记图库来源", 16, colorText(), true);
-            content.addView(rootsTitle, matchWrapWithTop(18));
+            TextView rootsTitle = text("已登记图库来源", 18, colorText(), true);
+            content.addView(rootsTitle, matchWrapWithTop(24));
             TextView rootsHint = text("可启用/禁用来源，并执行 dry-run 扫描预览。Android 不提供正式导入按钮。", 12, colorMuted(), false);
             rootsHint.setLineSpacing(dp(3), 1f);
             content.addView(rootsHint, matchWrapWithTop(8));
@@ -494,17 +538,16 @@ public class MainActivity extends Activity {
             } else {
                 for (GallerySource source : gallerySources) content.addView(gallerySourceRow(source), matchWrapWithTop(10));
             }
-
-            Button manageUsers = secondaryButton("账户与分享管理");
-            manageUsers.setOnClickListener(v -> new LoadUsersTask(false, () -> showUserShareManager()).execute());
-            LinearLayout.LayoutParams manageParams = matchWrapWithTop(12);
-            manageParams.height = dp(46);
-            content.addView(manageUsers, manageParams);
         } else {
-            TextView adminHint = text("添加相册库目录仅管理员可用；当前账号没有系统目录管理权限。", 12, colorMuted(), false);
-            adminHint.setLineSpacing(dp(3), 1f);
-            content.addView(adminHint, matchWrapWithTop(12));
+            TextView permissionTitle = text("需要管理员权限", 18, colorText(), true);
+            content.addView(permissionTitle, matchWrap());
+            TextView permissionHint = text("当前账号没有相册库目录和图库来源管理权限。请使用管理员账号进入后再添加来源、启用/禁用来源或执行 dry-run 扫描预览。", 12, colorMuted(), false);
+            permissionHint.setLineSpacing(dp(3), 1f);
+            content.addView(permissionHint, matchWrapWithTop(8));
         }
+
+        TextView localTitle = text("本机数据", 18, colorText(), true);
+        content.addView(localTitle, matchWrapWithTop(26));
 
         Button clearCache = secondaryButton("清除图片缓存");
         clearCache.setOnClickListener(v -> {
@@ -525,13 +568,6 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams searchParams = matchWrapWithTop(10);
         searchParams.height = dp(46);
         content.addView(clearSearch, searchParams);
-
-        Button logout = secondaryButton("退出登录");
-        logout.setTextColor(colorFavorite());
-        logout.setOnClickListener(v -> showLogin());
-        LinearLayout.LayoutParams logoutParams = matchWrapWithTop(24);
-        logoutParams.height = dp(46);
-        content.addView(logout, logoutParams);
 
         page.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         root.addView(page, fullScreen());
@@ -573,13 +609,24 @@ public class MainActivity extends Activity {
         root.removeAllViews();
 
         LinearLayout page = basePage();
-        page.addView(topBar("账户与分享", () -> showSettings(), null));
+        page.addView(topBar("账户管理", () -> showSettings(), null));
 
         ScrollView scroll = new ScrollView(this);
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(18), dp(8), dp(18), navigationBarHeight() + dp(24));
         scroll.addView(content);
+
+        if (!"admin".equals(role)) {
+            TextView permissionTitle = text("需要管理员权限", 18, colorText(), true);
+            content.addView(permissionTitle, matchWrap());
+            TextView permissionHint = text("当前账号没有普通账户和分享管理权限。请使用管理员账号进入后再创建账户、改密码、删除账户或调整相册分享。", 12, colorMuted(), false);
+            permissionHint.setLineSpacing(dp(3), 1f);
+            content.addView(permissionHint, matchWrapWithTop(8));
+            page.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+            root.addView(page, fullScreen());
+            return;
+        }
 
         TextView userTitle = text("普通账户", 18, colorText(), true);
         content.addView(userTitle, matchWrap());
@@ -716,6 +763,10 @@ public class MainActivity extends Activity {
     }
 
     private void showAccountShareDetail(String targetUser) {
+        if (!"admin".equals(role)) {
+            showUserShareManager();
+            return;
+        }
         currentScreen = SCREEN_ACCOUNT_DETAIL;
         currentAccountDetailUser = targetUser;
         viewerOpen = false;
@@ -741,6 +792,10 @@ public class MainActivity extends Activity {
     }
 
     private void renderAccountShareDetail(String targetUser, List<Album> sharedAlbums) {
+        if (!"admin".equals(role)) {
+            showUserShareManager();
+            return;
+        }
         currentScreen = SCREEN_ACCOUNT_DETAIL;
         currentAccountDetailUser = targetUser;
         viewerOpen = false;
@@ -2774,6 +2829,10 @@ public class MainActivity extends Activity {
             showSettings();
             return;
         }
+        if (SCREEN_DATA_MANAGER.equals(currentScreen)) {
+            showSettings();
+            return;
+        }
         if (SCREEN_SETTINGS.equals(currentScreen)) {
             showAlbums(false);
             return;
@@ -3180,6 +3239,7 @@ public class MainActivity extends Activity {
                 if (gallerySources.isEmpty()) gallerySources.add(new GallerySource(serverTitle(), ""));
                 if (SCREEN_ALBUMS.equals(currentScreen)) showAlbums(false);
                 if (SCREEN_SETTINGS.equals(currentScreen)) showSettings();
+                if (SCREEN_DATA_MANAGER.equals(currentScreen)) showDataManager();
                 return;
             }
             String before = activeGalleryPrefix;
@@ -3191,6 +3251,8 @@ public class MainActivity extends Activity {
                 showAlbums(!before.equals(activeGalleryPrefix));
             } else if (SCREEN_SETTINGS.equals(currentScreen)) {
                 showSettings();
+            } else if (SCREEN_DATA_MANAGER.equals(currentScreen)) {
+                showDataManager();
             }
         }
     }
@@ -3453,7 +3515,7 @@ public class MainActivity extends Activity {
         String detail = error == null || error.trim().isEmpty() ? "未知错误" : error.trim();
         return detail
                 + "\n\n当前服务地址：" + (baseUrl == null ? "" : baseUrl)
-                + "\n请确认手机能访问这个 LAN 地址和端口，v2 后端已启动，默认账号密码是 admin / change-me-admin-password。";
+                + "\n请确认手机能访问这个地址和端口，v2 后端已启动，账号密码已按你的部署配置创建。";
     }
 
     private static class MomentApi {
