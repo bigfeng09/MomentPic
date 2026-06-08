@@ -21,7 +21,7 @@ ENV NODE_ENV=production \
     PORT=3211 \
     MOMENTPIC_DB_PATH=/app/data/momentpic-v2.sqlite \
     MOMENTPIC_SEED_DEMO=false \
-    MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/srv/momentpic/imports/","to":"/srv/momentpic/imports/download/"}]' \
+    MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/example/media/moment/","to":"/example/media/moment/download/"}]' \
     MOMENTPIC_THUMBNAIL_CACHE_DIR=/app/data/thumbnails
 
 COPY package.json package-lock.json ./

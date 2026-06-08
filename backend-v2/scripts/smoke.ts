@@ -175,7 +175,7 @@ const dangerousGallery = await app.inject({
   method: "POST",
   url: "/api/v2/galleries",
   headers: { cookie: authHeader },
-  payload: { name: "Danger Gallery", path: "/srv/momentpic/media-root" }
+  payload: { name: "Danger Gallery", path: "/example/media-root" }
 });
 if (dangerousGallery.statusCode !== 400) {
   throw new Error(`dangerous gallery should be 400, got ${dangerousGallery.statusCode} ${dangerousGallery.body}`);

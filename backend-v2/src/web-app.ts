@@ -1156,7 +1156,7 @@ const webAppHtml = String.raw`<!doctype html>
           nameField.innerHTML = '<span>目录名称（可选）</span><input id="new-gallery-name" class="input" autocomplete="off" placeholder="Unraid Photos">';
           const pathField = document.createElement("label");
           pathField.className = "field";
-          pathField.innerHTML = '<span>服务器绝对路径</span><input id="new-gallery-path" class="input mono" autocomplete="off" placeholder="/srv/momentpic/photos" required>';
+          pathField.innerHTML = '<span>服务器绝对路径</span><input id="new-gallery-path" class="input mono" autocomplete="off" placeholder="/example/photos" required>';
           const submit = document.createElement("button");
           submit.id = "add-gallery-btn";
           submit.className = "btn primary";

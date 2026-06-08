@@ -48,11 +48,11 @@ npm start
 | `MOMENTPIC_COOKIE_TTL_SECONDS` | `86400` | 登录有效期 |
 | `MOMENTPIC_SEED_DEMO` | `true` | 是否写入最小 demo 图库/相册/资源 |
 | `MOMENTPIC_LEGACY_DB_PATH` | 无 | 旧 Moment Pic SQLite 路径，供 `npm run import:legacy` 使用 |
-| `MOMENTPIC_PATH_PREFIX_MAP` | legacy 默认映射 | 文件读取接口的运行时路径前缀映射。未设置时内置 `/srv/momentpic/imports/` -> `/srv/momentpic/imports/download/`；设置为 `[]` 可关闭默认映射 |
+| `MOMENTPIC_PATH_PREFIX_MAP` | legacy 默认映射 | 文件读取接口的运行时路径前缀映射。未设置时内置 `/example/media/moment/` -> `/example/media/moment/download/`；设置为 `[]` 可关闭默认映射 |
 | `MOMENTPIC_THUMBNAIL_CACHE_DIR` | `data/thumbnails` | 缩略图缓存目录 |
 | `MOMENTPIC_THUMBNAIL_MAX_SIZE` | `640` | 缩略图最长边尺寸，运行时限制在 64 到 2048 之间 |
 | `MOMENTPIC_ARCHIVE_ENTRY_MAX_BYTES` | `67108864` | archive/zip 单个 entry 最大读取大小，默认 64 MiB，最低 1 MiB；超限返回 413 |
-| `MOMENTPIC_LIBRARY_ALLOWED_ROOTS` | `/srv/momentpic/media,/srv/momentpic/photos,/srv/momentpic/imports` | 允许登记和扫描的服务端图库来源根，逗号分隔；危险路径如 `/`、`/srv/momentpic/media-root`、`/etc` 会被拒绝 |
+| `MOMENTPIC_LIBRARY_ALLOWED_ROOTS` | `/example/media,/example/photos,/example/media` | 允许登记和扫描的服务端图库来源根，逗号分隔；危险路径如 `/`、`/example/media-root`、`/etc` 会被拒绝 |
 
 ## 接口列表
 
@@ -84,7 +84,7 @@ npm start
 - 相册主页每个 album card 有 `...` 操作菜单：下载到本地（当前没有相册 zip API，会明确提示不支持批量相册下载）、分享给普通账户、生成公开分享链接。
 - 图片查看器的“图片操作”菜单支持下载原图、分享给普通账户、生成公开分享链接；普通账户授权沿用相册级 `shared_albums`，asset 公开链接沿用 public share token。
 - 设置页参考旧版 Moment Pic 的设置面：系统、账户、分享、缓存、扫描、关于；管理员可管理用户、重置密码、设置 role，维护用户已分享相册列表，并按名称/ID 取消分享；普通用户只显示自身账号状态。
-- 设置页系统面板使用 `GET /api/v2/system/status` 展示 backend URL、health、版本、当前用户、archive readiness、cache status、system_config 轮询/预加载和最近扫描摘要；管理员可用 `PATCH /api/v2/system/config` 修改前后各预加载图片数量，范围 `0-5`。该页面不会渲染 auth secret、密码 hash、DB 路径或媒体绝对路径。管理员可在同一区域添加、启用/禁用图库来源文件夹，提交的是后端/Unraid 服务端绝对路径，例如 `/srv/momentpic/photos`，不是浏览器本地目录。
+- 设置页系统面板使用 `GET /api/v2/system/status` 展示 backend URL、health、版本、当前用户、archive readiness、cache status、system_config 轮询/预加载和最近扫描摘要；管理员可用 `PATCH /api/v2/system/config` 修改前后各预加载图片数量，范围 `0-5`。该页面不会渲染 auth secret、密码 hash、DB 路径或媒体绝对路径。管理员可在同一区域添加、启用/禁用图库来源文件夹，提交的是后端/Unraid 服务端绝对路径，例如 `/example/photos`，不是浏览器本地目录。
 - 设置页分享支持从“收藏相册最新 50 个”或关键词全库搜索结果中多选相册，支持全选当前结果/清空选择；中文输入使用 composition 保护，组合期间不触发搜索重渲染。
 - 设置页扫描入口默认 `dryRun=true` 预览真实文件系统扫描；正式导入必须显式 `dryRun=false`，后端会先备份 SQLite 主文件和 WAL/SHM。禁用来源只修改系统记录，不删除磁盘真实图片。
 - Web UI 行为边界见 [docs/WEB_UI.md](docs/WEB_UI.md)。
@@ -183,7 +183,7 @@ X-MomentPic-Path-Mapped: true|false
 Unraid legacy 默认映射等价于：
 
 ```bash
-MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/srv/momentpic/imports/","to":"/srv/momentpic/imports/download/"}]'
+MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/example/media/moment/","to":"/example/media/moment/download/"}]'
 ```
 
 也支持简单格式：

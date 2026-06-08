@@ -18,7 +18,7 @@
 - 运行入口：`npm start` -> `node dist/src/index.js`
 - 数据库：`data/momentpic-v2-import-test.sqlite`
 - Demo seed：`MOMENTPIC_SEED_DEMO=false`
-- 路径映射：`/srv/momentpic/imports/` -> `/mnt/moment-download/download/moment/download/`
+- 路径映射：`/example/media/moment/` -> `/mnt/moment-download/download/moment/download/`
 - 日志：`/tmp/momentpic-v2-lan.log`
 - 用途：测试库 / LAN 临时验证服务。
 - 注意：该服务不一定代表正式主库状态。
@@ -30,7 +30,7 @@
 - 运行入口：`npm run start` -> `node dist/src/index.js`
 - 数据库：`data/momentpic-v2.sqlite`
 - Demo seed：`MOMENTPIC_SEED_DEMO=false`
-- 路径映射：`/srv/momentpic/imports/` -> `/mnt/moment-download/download/moment/download/`
+- 路径映射：`/example/media/moment/` -> `/mnt/moment-download/download/moment/download/`
 - 日志：`/tmp/momentpic-backendv2-3001.log`
 - 用途：本机主库验证服务。
 - 注意：这仍是本机运行服务，不等于 Unraid / Docker 已部署。

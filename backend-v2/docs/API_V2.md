@@ -131,7 +131,7 @@
 请求：
 
 ```json
-{ "name": "Unraid Photos", "path": "/srv/momentpic/photos" }
+{ "name": "Unraid Photos", "path": "/example/photos" }
 ```
 
 响应：
@@ -145,7 +145,7 @@
     "item": {
       "id": "photos",
       "name": "Unraid Photos",
-      "path": "/srv/momentpic/photos",
+      "path": "/example/photos",
       "enabled": true,
       "albumCount": 0,
       "lastScannedAt": null,
@@ -162,8 +162,8 @@
 
 限制：
 
-- `path` 必须是后端/Unraid 服务端绝对路径，例如 `/srv/momentpic/photos`，不是浏览器本地目录。
-- 默认允许根由 `MOMENTPIC_LIBRARY_ALLOWED_ROOTS` 控制；危险路径如 `/`、`/mnt`、`/srv/momentpic/media-root`、`/srv/momentpic/appdata`、`/etc`、`/root`、`/usr`、`/var`、`/proc`、`/sys`、`/dev` 会被拒绝。
+- `path` 必须是后端/Unraid 服务端绝对路径，例如 `/example/photos`，不是浏览器本地目录。
+- 默认允许根由 `MOMENTPIC_LIBRARY_ALLOWED_ROOTS` 控制；危险路径如 `/`、`/mnt`、`/example/media-root`、`/example/appdata`、`/etc`、`/root`、`/usr`、`/var`、`/proc`、`/sys`、`/dev` 会被拒绝。
 - 新增只登记来源，不扫描/导入媒体。重复路径返回 `409`，相对路径/URL/危险路径返回 `400`，普通用户返回 `403`。
 
 ### `PATCH /api/v2/galleries/:id`

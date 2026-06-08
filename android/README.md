@@ -27,7 +27,15 @@ The app stores the URL locally. Use the menu button in the top-right corner to c
 The app uses BackendV2 APIs for login, galleries, albums, assets, thumbnails, originals, public shares, and album sharing to normal users.
 Album batch ZIP download is not exposed because BackendV2 has no album ZIP API; download a single original image from the image viewer instead.
 
-In Settings, admin users can add an album library directory by entering a server-side absolute path such as `/srv/momentpic/photos`.
+In the full-screen image viewer, the image operation menu supports:
+
+- Share to a normal account: admin-only; loads `/api/v2/users`, filters `role=user`, and grants the current image's album with `/api/v2/users/:username/shared-albums/:albumId`.
+- Create a public share link: creates an asset public share with `/api/v2/public-shares`, copies the link, and opens Android's system share sheet.
+- Download original image: saves the current asset original image locally.
+
+Normal-account sharing is always album-level. The app does not create private per-asset grants; if the viewer cannot determine a real album, it asks the user to open the image from its album.
+
+In Settings, admin users can add an album library directory by entering a server-side absolute path such as `/example/photos`.
 This path is submitted to BackendV2 as a library root; it is not an Android local folder picker.
 Admins can enable or disable registered sources and run a `dryRun=true` scan preview from Android.
 Android does not expose `dryRun=false` real import in this build.

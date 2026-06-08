@@ -28,9 +28,9 @@ npm run preflight:main-import -- \
 - 目标主 DB 路径解析、主文件与 `-wal`、`-shm` sidecar 状态；目标 DB 存在时只读执行 integrity check
 - 目标 DB 所在目录或最近已存在父目录的读写/搜索权限，以及文件系统可用空间
 - `MOMENTPIC_PATH_PREFIX_MAP`、`MOMENTPIC_THUMBNAIL_CACHE_DIR`、`MOMENTPIC_ARCHIVE_ENTRY_MAX_BYTES` 当前建议值
-- `/srv/momentpic/media-root` 是否挂载，以及 archive 样本路径在原路径或映射路径下是否仍然不可读
+- `/example/media-root` 是否挂载，以及 archive 样本路径在原路径或映射路径下是否仍然不可读
 
-本机没有 `/srv/momentpic/media-root` 挂载时，archive 检查会显示 blocked，但脚本仍以 0 退出，便于把本地 preflight 结果作为安全记录。正式导入前必须在具备真实媒体只读挂载的环境重新跑同一检查，或明确接受 archive 读取在上线前仍未被真实样本验证的风险。
+本机没有 `/example/media-root` 挂载时，archive 检查会显示 blocked，但脚本仍以 0 退出，便于把本地 preflight 结果作为安全记录。正式导入前必须在具备真实媒体只读挂载的环境重新跑同一检查，或明确接受 archive 读取在上线前仍未被真实样本验证的风险。
 
 ## 备份模式
 

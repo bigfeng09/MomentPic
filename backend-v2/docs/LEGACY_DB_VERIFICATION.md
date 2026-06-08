@@ -40,7 +40,7 @@ If the file is missing, create or copy a fresh SQLite backup and rerun the comma
 Use SQLite `.backup` on Unraid instead of copying a live database file directly.
 
 ```bash
-ssh <user>@<unraid-host> 'sqlite3 /srv/momentpic/appdata/legacy/legacy.sqlite ".backup '\''/tmp/momentpic_legacy_dryrun.sqlite'\''"'
+ssh <user>@<unraid-host> 'sqlite3 /example/appdata/moment-pic/legacy-db.sqlite ".backup '\''/tmp/momentpic_legacy_dryrun.sqlite'\''"'
 scp <user>@<unraid-host>:/tmp/momentpic_legacy_dryrun.sqlite data/legacy-real-dryrun.sqlite
 ssh <user>@<unraid-host> 'rm -f /tmp/momentpic_legacy_dryrun.sqlite'
 npm run verify:legacy -- --legacy-db data/legacy-real-dryrun.sqlite

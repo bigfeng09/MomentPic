@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -441,7 +442,7 @@ public class MainActivity extends Activity {
             libraryHint.setLineSpacing(dp(3), 1f);
             content.addView(libraryHint, matchWrapWithTop(8));
             EditText libraryNameInput = input("目录名称（可选）", "");
-            EditText libraryPathInput = input("服务器目录路径，例如 /srv/momentpic/photos", "");
+            EditText libraryPathInput = input("服务器目录路径，例如 /example/photos", "");
             LinearLayout.LayoutParams libraryNameParams = matchWrapWithTop(10);
             libraryNameParams.height = dp(50);
             content.addView(libraryNameInput, libraryNameParams);
@@ -457,7 +458,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 if (!isServerAbsolutePath(libraryPath)) {
-                    toast("请输入服务端绝对路径，例如 /srv/momentpic/photos");
+                    toast("请输入服务端绝对路径，例如 /example/photos");
                     return;
                 }
                 addLibrary.setEnabled(false);
@@ -1150,6 +1151,14 @@ public class MainActivity extends Activity {
         toast("链接已复制");
     }
 
+    private void shareText(String title, String text) {
+        copyText(title, text);
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TEXT, text);
+        startActivity(Intent.createChooser(intent, title));
+    }
+
     private void showAlbumMoreDialog(Album album) {
         List<String> actions = new ArrayList<>();
         actions.add("下载相册到本地");
@@ -1180,6 +1189,31 @@ public class MainActivity extends Activity {
         new LoadAlbumSharesTask(album).execute();
     }
 
+    private void showShareAssetAlbumDialog(Asset asset) {
+        if (!"admin".equals(role)) {
+            showError("无法分享给普通账户", "只有管理员可以把图片所在相册授权给普通账户。");
+            return;
+        }
+        Album album = currentAssetAlbum(asset);
+        if (album == null || album.id == null || album.id.trim().isEmpty() || FAVORITES_ALBUM_ID.equals(album.id)) {
+            showError("无法确认所在相册", "普通账户分享按相册授权，不做单张图片私有授权。请从真实相册进入这张图片后再分享。");
+            return;
+        }
+        new LoadNormalUsersForAssetShareTask(album).execute();
+    }
+
+    private Album currentAssetAlbum(Asset asset) {
+        if (currentAlbum != null && currentAlbum.id != null && !currentAlbum.id.trim().isEmpty()
+                && !FAVORITES_ALBUM_ID.equals(currentAlbum.id)) {
+            return currentAlbum;
+        }
+        if (asset == null || asset.albumId == null || asset.albumId.trim().isEmpty()) return null;
+        Album album = new Album();
+        album.id = asset.albumId.trim();
+        album.name = "当前图片所在相册";
+        return album;
+    }
+
     private void showShareAlbumDialogWithState(Album album, List<String> users, Set<String> sharedUsers) {
         if (users.isEmpty()) {
             toast("请先在设置里创建普通账户");
@@ -1198,6 +1232,13 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    private boolean isNormalUser(UserAccount account) {
+        if (account == null) return false;
+        String user = account.username == null ? "" : account.username.trim();
+        String accountRole = account.role == null ? "" : account.role.trim();
+        return !user.isEmpty() && "user".equals(accountRole) && !"admin".equals(user);
     }
 
     private void showAssets() {
@@ -1593,11 +1634,18 @@ public class MainActivity extends Activity {
                 return;
             }
             Asset asset = assets.get(currentAssetIndex);
+            List<String> actions = new ArrayList<>();
+            actions.add("分享给普通账户");
+            actions.add("生成公开分享链接");
+            actions.add("下载原图");
+            String[] items = actions.toArray(new String[0]);
             new AlertDialog.Builder(this)
                     .setTitle("图片操作")
-                    .setItems(new String[]{"下载到本地", "生成公开分享链接"}, (dialog, which) -> {
-                        if (which == 0) new DownloadAssetTask(asset).execute();
-                        else new CreatePublicShareTask("asset", asset.id).execute();
+                    .setItems(items, (dialog, which) -> {
+                        String action = items[which];
+                        if ("分享给普通账户".equals(action)) showShareAssetAlbumDialog(asset);
+                        else if ("生成公开分享链接".equals(action)) new CreatePublicShareTask("asset", asset.id).execute();
+                        else new DownloadAssetTask(asset).execute();
                     })
                     .setNegativeButton("取消", null)
                     .show();
@@ -2026,6 +2074,7 @@ public class MainActivity extends Activity {
                 JSONObject item = new JSONObject();
                 item.put("id", asset.id);
                 item.put("name", asset.name);
+                item.put("albumId", asset.albumId);
                 item.put("thumbnailUrl", asset.thumbnailUrl);
                 item.put("originalUrl", asset.originalUrl);
                 array.put(item);
@@ -2145,6 +2194,7 @@ public class MainActivity extends Activity {
         Asset copy = new Asset();
         copy.id = source.id;
         copy.name = source.name;
+        copy.albumId = source.albumId;
         copy.thumbnailUrl = source.thumbnailUrl;
         copy.originalUrl = source.originalUrl;
         return copy;
@@ -2870,7 +2920,7 @@ public class MainActivity extends Activity {
         @Override protected String doInBackground(Void... voids) { try { return api.createPublicShare(type, targetId); } catch (Exception ignored) { return null; } }
         @Override protected void onPostExecute(String url) {
             if (url == null || url.isEmpty()) toast("生成分享链接失败");
-            else copyText("Moment Pic 分享链接", url);
+            else shareText("Moment Pic 分享链接", url);
         }
     }
 
@@ -2906,7 +2956,7 @@ public class MainActivity extends Activity {
                 userAccounts.addAll(loaded);
                 Map<String, Set<String>> shares = new HashMap<>();
                 for (UserAccount account : loaded) {
-                    if ("admin".equals(account.username)) continue;
+                    if (!isNormalUser(account)) continue;
                     users.add(account.username);
                     shares.put(account.username, api.getSharedAlbumIds(account.username));
                 }
@@ -2926,6 +2976,54 @@ public class MainActivity extends Activity {
                 if (ids != null && ids.contains(album.id)) sharedUsers.add(user);
             }
             showShareAlbumDialogWithState(album, users, sharedUsers);
+        }
+    }
+
+    private class LoadNormalUsersForAssetShareTask extends AsyncTask<Void, Void, List<UserAccount>> {
+        private final Album album;
+        private String error;
+
+        LoadNormalUsersForAssetShareTask(Album album) {
+            this.album = album;
+        }
+
+        @Override
+        protected List<UserAccount> doInBackground(Void... voids) {
+            try {
+                List<UserAccount> loaded = api.getUsers();
+                userAccounts.clear();
+                userAccounts.addAll(loaded);
+                List<UserAccount> normalUsers = new ArrayList<>();
+                for (UserAccount account : loaded) {
+                    if (isNormalUser(account)) normalUsers.add(account);
+                }
+                return normalUsers;
+            } catch (Exception e) {
+                error = e.getMessage();
+                return null;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(List<UserAccount> normalUsers) {
+            if (normalUsers == null) {
+                showError("普通账户加载失败", error == null || error.trim().isEmpty() ? "请确认当前账号是管理员，且后端 /api/v2/users 可访问。" : error);
+                return;
+            }
+            if (normalUsers.isEmpty()) {
+                showError("没有普通账户", "当前没有可授权的普通账户。请先在设置里创建 role=user 的普通账户。");
+                return;
+            }
+            String[] items = new String[normalUsers.size()];
+            for (int i = 0; i < normalUsers.size(); i++) items[i] = normalUsers.get(i).username;
+            new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("把相册授权给")
+                    .setItems(items, (dialog, which) -> new ShareAlbumTask(items[which], album, ok -> {
+                        if (ok) showError("分享成功", "已把当前图片所在相册授权给普通账户：" + items[which]);
+                        else showError("分享失败", "未能把相册授权给普通账户，请稍后重试。");
+                    }).execute())
+                    .setNegativeButton("取消", null)
+                    .show();
         }
     }
 
@@ -3618,7 +3716,9 @@ public class MainActivity extends Activity {
             JSONArray items = data.getJSONArray("items");
             List<Asset> assets = new ArrayList<>();
             for (int i = 0; i < items.length(); i++) {
-                assets.add(Asset.from(items.getJSONObject(i)));
+                Asset asset = Asset.from(items.getJSONObject(i));
+                if (asset.albumId == null || asset.albumId.trim().isEmpty()) asset.albumId = albumId;
+                assets.add(asset);
             }
             return new PageResult<>(assets, data.getJSONObject("pagination").getInt("total"));
         }
@@ -3892,6 +3992,7 @@ public class MainActivity extends Activity {
     private static class Asset {
         String id;
         String name;
+        String albumId;
         String thumbnailUrl;
         String originalUrl;
 
@@ -3899,6 +4000,7 @@ public class MainActivity extends Activity {
             Asset asset = new Asset();
             asset.id = json.optString("id");
             asset.name = json.optString("name");
+            asset.albumId = json.optString("albumId");
             asset.thumbnailUrl = Album.firstNonEmpty(
                     json.optString("thumbnailUrl"),
                     json.optString("thumbUrl"),

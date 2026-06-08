@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     network_mode: bridge
     env_file:
-      - path: /srv/momentpic/appdata/backend-v2/.env
+      - path: /example/appdata/moment-pic-v2/.env
         required: false
     ports:
       - "3211:3211"
@@ -16,8 +16,8 @@ services:
       PORT: "3211"
       MOMENTPIC_DB_PATH: "/app/data/momentpic-v2.sqlite"
       MOMENTPIC_SEED_DEMO: "false"
-      MOMENTPIC_PATH_PREFIX_MAP: '[{"from":"/srv/momentpic/imports/","to":"/srv/momentpic/imports/download/"}]'
+      MOMENTPIC_PATH_PREFIX_MAP: '[{"from":"/example/media/moment/","to":"/example/media/moment/download/"}]'
       MOMENTPIC_THUMBNAIL_CACHE_DIR: "/app/data/thumbnails"
     volumes:
-      - /srv/momentpic/appdata/backend-v2/data:/app/data
-      - /srv/momentpic/imports:/srv/momentpic/imports:ro
+      - /example/appdata/moment-pic-v2/data:/app/data
+      - /example/media/moment:/example/media/moment:ro

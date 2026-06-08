@@ -299,9 +299,9 @@ const canReadFile = (filePath: string): boolean => {
 const checkArchiveReadiness = (config: AppConfig, legacyDbPath: string, importedDbPath: string, sampleLimit: number): CheckRow[] => {
   const rows: CheckRow[] = [];
   rows.push({
-    label: "/srv/momentpic/media-root mount",
-    status: isMountPoint("/srv/momentpic/media-root") ? "ok" : "blocked",
-    detail: fs.existsSync("/srv/momentpic/media-root") ? "/srv/momentpic/media-root exists" : "/srv/momentpic/media-root is not present on this host"
+    label: "/example/media-root mount",
+    status: isMountPoint("/example/media-root") ? "ok" : "blocked",
+    detail: fs.existsSync("/example/media-root") ? "/example/media-root exists" : "/example/media-root is not present on this host"
   });
 
   const sampleSource =

@@ -27,8 +27,8 @@ const projectRoot = process.cwd();
 
 const defaultPathPrefixMap: PathPrefixMapRule[] = [
   {
-    from: "/srv/momentpic/imports/",
-    to: "/srv/momentpic/imports/download/"
+    from: "/example/media/moment/",
+    to: "/example/media/moment/download/"
   }
 ];
 
@@ -90,7 +90,7 @@ export const loadConfig = (overrides: Partial<AppConfig> = {}): AppConfig => {
     host: process.env.HOST ?? "127.0.0.1",
     port: Number.isFinite(port) ? port : 3000,
     dbPath: process.env.MOMENTPIC_DB_PATH ?? path.resolve(projectRoot, "data", "momentpic-v2.sqlite"),
-    authSecret: process.env.MOMENTPIC_AUTH_SECRET ?? process.env.MOMENTPIC_ADMIN_PASSWORD ?? "change-me-local-dev-secret",
+    authSecret: process.env.MOMENTPIC_AUTH_SECRET ?? process.env.MOMENTPIC_ADMIN_PASSWORD ?? "change-me-local-auth-secret",
     adminUsername: (process.env.MOMENTPIC_ADMIN_USERNAME ?? "admin").trim().toLowerCase(),
     adminPassword: process.env.MOMENTPIC_ADMIN_PASSWORD ?? "change-me-admin-password",
     cookieName: process.env.MOMENTPIC_COOKIE_NAME ?? "moment_pic_v2_auth",
@@ -102,9 +102,9 @@ export const loadConfig = (overrides: Partial<AppConfig> = {}): AppConfig => {
     thumbnailMaxSize: Math.max(64, Math.min(2048, Math.round(numberFromEnv(process.env.MOMENTPIC_THUMBNAIL_MAX_SIZE, 640)))),
     archiveEntryMaxBytes: Math.max(1024 * 1024, Math.round(numberFromEnv(process.env.MOMENTPIC_ARCHIVE_ENTRY_MAX_BYTES, 64 * 1024 * 1024))),
     libraryRootAllowedPrefixes: parsePathList(process.env.MOMENTPIC_LIBRARY_ALLOWED_ROOTS, [
-      "/srv/momentpic/media",
-      "/srv/momentpic/photos",
-      "/srv/momentpic/imports"
+      "/example/media",
+      "/example/photos",
+      "/example/media"
     ]),
     ...overrides
   };
