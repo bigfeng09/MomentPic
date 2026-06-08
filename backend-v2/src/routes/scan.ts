@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { fail, ok } from "../lib/api.js";
+import { scanLibraryRoot } from "../services/library-scanner.js";
 
 interface ScanTaskRow {
   id: string;
@@ -31,13 +32,36 @@ const toDto = (row: ScanTaskRow) => ({
 });
 
 export const scanRoutes = async (app: FastifyInstance): Promise<void> => {
+  const requireAdmin = (request: { authUser?: { role: string } }, reply: { status: (code: number) => { send: (payload: unknown) => unknown } }) => {
+    if (request.authUser?.role === "admin") return true;
+    reply.status(403).send(fail(4030, "admin only"));
+    return false;
+  };
+
   app.post("/api/v2/scan", async (request, reply) => {
+    if (!requireAdmin(request, reply)) return;
     const body = request.body as { dryRun?: unknown; galleryId?: unknown } | undefined;
     const dryRun = body?.dryRun !== false;
-    if (!dryRun) {
-      return reply.status(501).send(fail(5012, "write scan is not implemented; retry with dryRun=true"));
-    }
     const galleryId = body?.galleryId == null ? null : String(body.galleryId).trim();
+    if (galleryId) {
+      try {
+        const result = await scanLibraryRoot(app.db, app.config, galleryId, dryRun);
+        app.db
+          .prepare(
+            `INSERT INTO scan_tasks (id, status, dry_run, gallery_id, created_by, created_at, started_at, finished_at, albums_discovered, assets_discovered)
+             VALUES (?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(result.taskId, dryRun ? 1 : 0, galleryId, request.authUser!.username, new Date().toISOString(), new Date().toISOString(), new Date().toISOString(), result.discovered.albums, result.discovered.assets);
+        return ok(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "scan failed";
+        const status = message === "gallery not found" ? 404 : 400;
+        return reply.status(status).send(fail(status === 404 ? 4004 : 4000, message));
+      }
+    }
+    if (!dryRun) {
+      return reply.status(400).send(fail(4000, "galleryId is required for dryRun=false"));
+    }
     const taskId = `scan_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
     const now = new Date().toISOString();
     const albumFilter = galleryId ? "WHERE library_root_id = ?" : "";

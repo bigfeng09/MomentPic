@@ -33,7 +33,8 @@ const app = await buildApp({
   seedDemoData: true,
   pathPrefixMap: [{ from: legacyPrefix, to: runtimePrefix }],
   thumbnailCacheDir: path.join(tempDir, "thumbnail-cache"),
-  thumbnailMaxSize: 32
+  thumbnailMaxSize: 32,
+  libraryRootAllowedPrefixes: [tempDir, "/demo"]
 });
 
 const health = await app.inject({ method: "GET", url: "/api/v2/health" });
@@ -45,13 +46,50 @@ if (
   !String(webRoot.headers["content-type"]).includes("text/html") ||
   !webRoot.body.includes('id="login-screen"') ||
   !webRoot.body.includes('id="album-grid"') ||
-  !webRoot.body.includes("/api/v2/auth/login")
+  !webRoot.body.includes('id="settings-view"') ||
+  !webRoot.body.includes('id="gallery-add-panel"') ||
+  !webRoot.body.includes('id="library-roots-panel"') ||
+  !webRoot.body.includes('id="favorite-filter-btn"') ||
+  !webRoot.body.includes('id="action-menu"') ||
+  !webRoot.body.includes('id="share-dialog"') ||
+  !webRoot.body.includes("/api/v2/system/status") ||
+  !webRoot.body.includes("/api/v2/system/config") ||
+  !webRoot.body.includes("/api/v2/auth/login") ||
+  !webRoot.body.includes("/api/v2/galleries") ||
+  !webRoot.body.includes("/api/v2/favorite-albums") ||
+  !webRoot.body.includes("/api/v2/albums?page=1&pageSize=50") ||
+  !webRoot.body.includes("预加载图片数量") ||
+  !webRoot.body.includes("分享给普通账户") ||
+  !webRoot.body.includes("分享 \" + state.selectedShareAlbumIds.size + \" 个相册") ||
+  !webRoot.body.includes("全选当前结果") ||
+  !webRoot.body.includes("清空选择") ||
+  !webRoot.body.includes("compositionstart") ||
+  !webRoot.body.includes("compositionend") ||
+  !webRoot.body.includes("输入关键词搜索全库相册") ||
+  !webRoot.body.includes("结果最多显示前 50 条") ||
+  !webRoot.body.includes("默认显示收藏相册最新 50 个") ||
+  webRoot.body.includes("默认最近更新前 50 个相册") ||
+  webRoot.body.includes("默认显示最近更新前 50 个相册") ||
+  !webRoot.body.includes('id="viewer-prev-zone"') ||
+  !webRoot.body.includes('id="viewer-next-zone"') ||
+  !webRoot.body.includes("changeViewerAsset") ||
+  !webRoot.body.includes("图片操作") ||
+  !webRoot.body.includes("下载到本地") ||
+  !webRoot.body.includes("生成公开分享链接") ||
+  !webRoot.body.includes("真实扫描导入") ||
+  !webRoot.body.includes("图库来源文件夹") ||
+  !webRoot.body.includes("正式导入必须 dryRun=false") ||
+  !webRoot.body.includes("后端/Unraid 服务端路径，不是浏览器本地目录") ||
+  !webRoot.body.includes("默认先扫描预览") ||
+  !webRoot.body.includes("后端错误 ")
 ) {
   throw new Error(`web root smoke failed: ${webRoot.statusCode} ${webRoot.body.slice(0, 160)}`);
 }
 
 const rejected = await app.inject({ method: "GET", url: "/api/v2/galleries" });
 if (rejected.statusCode !== 401) throw new Error(`expected auth guard, got ${rejected.statusCode}`);
+const rejectedSystem = await app.inject({ method: "GET", url: "/api/v2/system/status" });
+if (rejectedSystem.statusCode !== 401) throw new Error(`expected system auth guard, got ${rejectedSystem.statusCode}`);
 
 const login = await app.inject({
   method: "POST",
@@ -66,6 +104,7 @@ if (!cookieHeader) throw new Error("login did not set cookie");
 const authHeader = cookieHeader.split(";")[0] ?? "";
 const urls = [
   "/api/v2/me",
+  "/api/v2/system/status",
   "/api/v2/galleries",
   "/api/v2/albums",
   "/api/v2/albums/album-demo",
@@ -76,6 +115,153 @@ const urls = [
 for (const url of urls) {
   const response = await app.inject({ method: "GET", url, headers: { cookie: authHeader } });
   if (response.statusCode !== 200) throw new Error(`${url} failed: ${response.statusCode} ${response.body}`);
+}
+
+const updateSystemConfig = await app.inject({
+  method: "PATCH",
+  url: "/api/v2/system/config",
+  headers: { cookie: authHeader },
+  payload: { preloadBefore: 4, preloadAfter: 5 }
+});
+const updateSystemConfigData = JSON.parse(updateSystemConfig.body).data as { preloadBefore?: number; preloadAfter?: number };
+if (updateSystemConfig.statusCode !== 200 || updateSystemConfigData.preloadBefore !== 4 || updateSystemConfigData.preloadAfter !== 5) {
+  throw new Error(`system config update failed: ${updateSystemConfig.statusCode} ${updateSystemConfig.body}`);
+}
+const invalidSystemConfig = await app.inject({
+  method: "PATCH",
+  url: "/api/v2/system/config",
+  headers: { cookie: authHeader },
+  payload: { preloadBefore: 6, preloadAfter: 0 }
+});
+if (invalidSystemConfig.statusCode !== 400) {
+  throw new Error(`invalid system config should be 400, got ${invalidSystemConfig.statusCode} ${invalidSystemConfig.body}`);
+}
+
+const createGallery = await app.inject({
+  method: "POST",
+  url: "/api/v2/galleries",
+  headers: { cookie: authHeader },
+  payload: { name: "Smoke Gallery", path: path.join(tempDir, "server-gallery") }
+});
+const createGalleryData = JSON.parse(createGallery.body).data as { item?: { id: string; name: string; path: string }; scan?: { dryRunAvailable: boolean } };
+if (
+  createGallery.statusCode !== 200 ||
+  createGalleryData.item?.name !== "Smoke Gallery" ||
+  createGalleryData.item?.path !== path.join(tempDir, "server-gallery") ||
+  createGalleryData.scan?.dryRunAvailable !== true
+) {
+  throw new Error(`create gallery failed: ${createGallery.statusCode} ${createGallery.body}`);
+}
+if (!createGalleryData.item) throw new Error("create gallery did not return item");
+const duplicateGallery = await app.inject({
+  method: "POST",
+  url: "/api/v2/galleries",
+  headers: { cookie: authHeader },
+  payload: { name: "Duplicate Gallery", path: path.join(tempDir, "server-gallery") }
+});
+if (duplicateGallery.statusCode !== 409) {
+  throw new Error(`duplicate gallery should be 409, got ${duplicateGallery.statusCode} ${duplicateGallery.body}`);
+}
+const invalidGallery = await app.inject({
+  method: "POST",
+  url: "/api/v2/galleries",
+  headers: { cookie: authHeader },
+  payload: { name: "Invalid Gallery", path: "relative/gallery" }
+});
+if (invalidGallery.statusCode !== 400) {
+  throw new Error(`invalid gallery should be 400, got ${invalidGallery.statusCode} ${invalidGallery.body}`);
+}
+const dangerousGallery = await app.inject({
+  method: "POST",
+  url: "/api/v2/galleries",
+  headers: { cookie: authHeader },
+  payload: { name: "Danger Gallery", path: "/srv/momentpic/media-root" }
+});
+if (dangerousGallery.statusCode !== 400) {
+  throw new Error(`dangerous gallery should be 400, got ${dangerousGallery.statusCode} ${dangerousGallery.body}`);
+}
+const galleriesAfterCreate = await app.inject({ method: "GET", url: "/api/v2/galleries", headers: { cookie: authHeader } });
+if (
+  galleriesAfterCreate.statusCode !== 200 ||
+  !JSON.parse(galleriesAfterCreate.body).data.items.some((item: { name: string; path: string }) => item.name === "Smoke Gallery")
+) {
+  throw new Error(`created gallery list smoke failed: ${galleriesAfterCreate.statusCode} ${galleriesAfterCreate.body}`);
+}
+const smokeGalleryId = createGalleryData.item.id;
+const smokeGalleryPath = createGalleryData.item.path;
+fs.mkdirSync(path.join(smokeGalleryPath, "子相册"), { recursive: true });
+await sharp({
+  create: {
+    width: 24,
+    height: 16,
+    channels: 3,
+    background: { r: 120, g: 160, b: 90 }
+  }
+})
+  .png()
+  .toFile(path.join(smokeGalleryPath, "root-image.png"));
+await sharp({
+  create: {
+    width: 28,
+    height: 18,
+    channels: 3,
+    background: { r: 160, g: 90, b: 120 }
+  }
+})
+  .jpeg()
+  .toFile(path.join(smokeGalleryPath, "子相册", "child-image.jpg"));
+
+const galleryScanDryRun = await app.inject({
+  method: "POST",
+  url: `/api/v2/galleries/${smokeGalleryId}/scan`,
+  headers: { cookie: authHeader },
+  payload: { dryRun: true }
+});
+const galleryScanDryRunData = JSON.parse(galleryScanDryRun.body).data as { dryRun?: boolean; discovered?: { albums: number; assets: number }; changes?: { albumsToCreate: number; assetsToCreate: number } };
+if (
+  galleryScanDryRun.statusCode !== 200 ||
+  galleryScanDryRunData.dryRun !== true ||
+  galleryScanDryRunData.discovered?.albums !== 2 ||
+  galleryScanDryRunData.discovered?.assets !== 2 ||
+  galleryScanDryRunData.changes?.albumsToCreate !== 2 ||
+  galleryScanDryRunData.changes?.assetsToCreate !== 2
+) {
+  throw new Error(`gallery scan dry-run failed: ${galleryScanDryRun.statusCode} ${galleryScanDryRun.body}`);
+}
+
+const galleryScanRun = await app.inject({
+  method: "POST",
+  url: `/api/v2/galleries/${smokeGalleryId}/scan`,
+  headers: { cookie: authHeader },
+  payload: { dryRun: false }
+});
+const galleryScanRunData = JSON.parse(galleryScanRun.body).data as { dryRun?: boolean; backupPath?: string; discovered?: { albums: number; assets: number } };
+if (
+  galleryScanRun.statusCode !== 200 ||
+  galleryScanRunData.dryRun !== false ||
+  !galleryScanRunData.backupPath ||
+  !fs.existsSync(galleryScanRunData.backupPath) ||
+  galleryScanRunData.discovered?.albums !== 2 ||
+  galleryScanRunData.discovered?.assets !== 2
+) {
+  throw new Error(`gallery scan import failed: ${galleryScanRun.statusCode} ${galleryScanRun.body}`);
+}
+const scannedAlbums = await app.inject({
+  method: "GET",
+  url: `/api/v2/albums?galleryId=${encodeURIComponent(smokeGalleryId)}&page=1&pageSize=10`,
+  headers: { cookie: authHeader }
+});
+const scannedAlbumItems = JSON.parse(scannedAlbums.body).data.items as Array<{ id: string; name: string; assetCount: number }>;
+if (scannedAlbums.statusCode !== 200 || scannedAlbumItems.length !== 2 || scannedAlbumItems.reduce((sum, item) => sum + item.assetCount, 0) !== 2) {
+  throw new Error(`scanned albums list failed: ${scannedAlbums.statusCode} ${scannedAlbums.body}`);
+}
+const scannedAssets = await app.inject({
+  method: "GET",
+  url: `/api/v2/albums/${encodeURIComponent(scannedAlbumItems[0].id)}/assets`,
+  headers: { cookie: authHeader }
+});
+if (scannedAssets.statusCode !== 200 || JSON.parse(scannedAssets.body).data.items.length < 1) {
+  throw new Error(`scanned assets list failed: ${scannedAssets.statusCode} ${scannedAssets.body}`);
 }
 
 const createUser = await app.inject({
@@ -89,6 +275,23 @@ if (createUser.statusCode !== 200) throw new Error(`create user failed: ${create
 const usersList = await app.inject({ method: "GET", url: "/api/v2/users", headers: { cookie: authHeader } });
 if (usersList.statusCode !== 200 || !JSON.parse(usersList.body).data.items.some((item: { username: string }) => item.username === "viewer")) {
   throw new Error(`users list smoke failed: ${usersList.statusCode} ${usersList.body}`);
+}
+
+const roleOnlyUser = await app.inject({
+  method: "POST",
+  url: "/api/v2/users",
+  headers: { cookie: authHeader },
+  payload: { username: "roleonly", password: "roleonly123", role: "user" }
+});
+if (roleOnlyUser.statusCode !== 200) throw new Error(`roleonly create failed: ${roleOnlyUser.statusCode} ${roleOnlyUser.body}`);
+const roleOnlyUpdate = await app.inject({
+  method: "PATCH",
+  url: "/api/v2/users/roleonly",
+  headers: { cookie: authHeader },
+  payload: { username: "roleonly", password: "", role: "admin" }
+});
+if (roleOnlyUpdate.statusCode !== 200 || JSON.parse(roleOnlyUpdate.body).data.role !== "admin") {
+  throw new Error(`role-only user update failed: ${roleOnlyUpdate.statusCode} ${roleOnlyUpdate.body}`);
 }
 
 const shareAlbum = await app.inject({
@@ -187,6 +390,33 @@ const userCookieHeader = (Array.isArray(userSetCookie) ? userSetCookie[0] : user
 const viewerAlbums = await app.inject({ method: "GET", url: "/api/v2/albums", headers: { cookie: userCookieHeader } });
 if (viewerAlbums.statusCode !== 200 || JSON.parse(viewerAlbums.body).data.items.length !== 1) {
   throw new Error(`viewer shared album list failed: ${viewerAlbums.statusCode} ${viewerAlbums.body}`);
+}
+const viewerCreateGallery = await app.inject({
+  method: "POST",
+  url: "/api/v2/galleries",
+  headers: { cookie: userCookieHeader },
+  payload: { name: "Viewer Gallery", path: path.join(tempDir, "viewer-gallery") }
+});
+if (viewerCreateGallery.statusCode !== 403) {
+  throw new Error(`viewer create gallery should be 403, got ${viewerCreateGallery.statusCode} ${viewerCreateGallery.body}`);
+}
+const viewerSystemConfig = await app.inject({
+  method: "PATCH",
+  url: "/api/v2/system/config",
+  headers: { cookie: userCookieHeader },
+  payload: { preloadBefore: 1, preloadAfter: 1 }
+});
+if (viewerSystemConfig.statusCode !== 403) {
+  throw new Error(`viewer system config should be 403, got ${viewerSystemConfig.statusCode} ${viewerSystemConfig.body}`);
+}
+const viewerScan = await app.inject({
+  method: "POST",
+  url: "/api/v2/scan",
+  headers: { cookie: userCookieHeader },
+  payload: { dryRun: true }
+});
+if (viewerScan.statusCode !== 403) {
+  throw new Error(`viewer scan should be 403, got ${viewerScan.statusCode} ${viewerScan.body}`);
 }
 
 for (const url of ["/api/v2/assets/asset-demo-1/original", "/api/v2/assets/asset-demo-1/thumbnail"]) {

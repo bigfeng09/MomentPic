@@ -298,11 +298,10 @@ const canReadFile = (filePath: string): boolean => {
 
 const checkArchiveReadiness = (config: AppConfig, legacyDbPath: string, importedDbPath: string, sampleLimit: number): CheckRow[] => {
   const rows: CheckRow[] = [];
-  const mediaMountRoot = process.env.MOMENTPIC_MEDIA_MOUNT_ROOT ?? "/media";
   rows.push({
-    label: "media mount",
-    status: isMountPoint(mediaMountRoot) ? "ok" : "blocked",
-    detail: fs.existsSync(mediaMountRoot) ? `${mediaMountRoot} exists` : `${mediaMountRoot} is not present on this host`
+    label: "/srv/momentpic/media-root mount",
+    status: isMountPoint("/srv/momentpic/media-root") ? "ok" : "blocked",
+    detail: fs.existsSync("/srv/momentpic/media-root") ? "/srv/momentpic/media-root exists" : "/srv/momentpic/media-root is not present on this host"
   });
 
   const sampleSource =

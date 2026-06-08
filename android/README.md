@@ -1,63 +1,33 @@
-# MomentPic Android
+# Moment Pic Android
 
-Android client for a self-hosted MomentPic Backend V2 server.
+Native Android client for the self-hosted Moment Pic BackendV2 service.
 
-## Requirements
-
-- JDK compatible with the Android Gradle Plugin used by this project.
-- Android SDK installed locally.
-- Network access to the backend from the device or emulator.
-
-## Build debug APK
-
-Linux/macOS:
-
-```bash
-bash ./gradlew :app:assembleDebug
-```
-
-Windows:
+## Build
 
 ```powershell
 .\gradlew.bat :app:assembleDebug
 ```
 
-Output:
+The debug APK is generated at:
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Install and configure
+## Usage
 
-Install `app-debug.apk` on a test device. On first use, set the backend URL, for example:
-
-```text
-http://<server-ip>:3211
-```
-
-For an Android emulator talking to a backend on the host machine, use:
+Install the APK and open it. The default service URL is the LAN BackendV2 instance:
 
 ```text
 http://10.0.2.2:3211
 ```
 
-The app stores the backend URL locally. Use the top-right menu to change it later.
+The app stores the URL locally. Use the menu button in the top-right corner to change it later.
 
-## Login
+The app uses BackendV2 APIs for login, galleries, albums, assets, thumbnails, originals, public shares, and album sharing to normal users.
+Album batch ZIP download is not exposed because BackendV2 has no album ZIP API; download a single original image from the image viewer instead.
 
-Use the admin username/password configured in the backend `.env` file, for example:
-
-```text
-username: admin
-password: <your MOMENTPIC_ADMIN_PASSWORD>
-```
-
-## Do not commit
-
-- `local.properties`
-- signing keys / keystores
-- `google-services.*`
-- `app/build/`
-- APK/AAB outputs
-- Gradle caches
+In Settings, admin users can add an album library directory by entering a server-side absolute path such as `/srv/momentpic/photos`.
+This path is submitted to BackendV2 as a library root; it is not an Android local folder picker.
+Admins can enable or disable registered sources and run a `dryRun=true` scan preview from Android.
+Android does not expose `dryRun=false` real import in this build.

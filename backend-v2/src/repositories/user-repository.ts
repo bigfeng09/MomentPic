@@ -69,26 +69,28 @@ export class UserRepository {
     const oldUsername = normalizeUsername(oldUsernameInput);
     const nextUsername = normalizeUsername(nextUsernameInput ?? oldUsername);
     const role: UserRole = roleInput === "admin" ? "admin" : "user";
-    if (!oldUsername || !nextUsername || !password) throw new Error("username and password required");
+    if (!oldUsername || !nextUsername) throw new Error("username required");
     if (oldUsername === adminUsername && nextUsername !== adminUsername) throw new Error("cannot rename admin");
     const existing = this.findByUsername(oldUsername);
     if (!existing) throw new Error("user not found");
     if (oldUsername !== nextUsername && this.findByUsername(nextUsername)) throw new Error("target user exists");
 
     const now = new Date().toISOString();
-    const passwordHash = hashPassword(password);
+    const shouldResetPassword = password.length > 0;
+    const passwordHash = shouldResetPassword ? hashPassword(password) : existing.password_hash;
+    const passwordResetRequired = shouldResetPassword ? 0 : existing.password_reset_required;
     this.db.exec("BEGIN;");
     try {
       if (oldUsername !== nextUsername) {
         this.db
-          .prepare("UPDATE users SET username = ?, password_hash = ?, role = ?, password_reset_required = 0, updated_at = ? WHERE username = ?")
-          .run(nextUsername, passwordHash, role, now, oldUsername);
+          .prepare("UPDATE users SET username = ?, password_hash = ?, role = ?, password_reset_required = ?, updated_at = ? WHERE username = ?")
+          .run(nextUsername, passwordHash, role, passwordResetRequired, now, oldUsername);
         this.db.prepare("UPDATE shared_albums SET username = ?, updated_at = ? WHERE username = ?").run(nextUsername, now, oldUsername);
         this.db.prepare("UPDATE favorite_albums SET username = ?, updated_at = ? WHERE username = ?").run(nextUsername, now, oldUsername);
       } else {
         this.db
-          .prepare("UPDATE users SET password_hash = ?, role = ?, password_reset_required = 0, updated_at = ? WHERE username = ?")
-          .run(passwordHash, role, now, oldUsername);
+          .prepare("UPDATE users SET password_hash = ?, role = ?, password_reset_required = ?, updated_at = ? WHERE username = ?")
+          .run(passwordHash, role, passwordResetRequired, now, oldUsername);
       }
       this.db.exec("COMMIT;");
     } catch (error) {

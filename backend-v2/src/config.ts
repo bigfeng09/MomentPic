@@ -15,6 +15,7 @@ export interface AppConfig {
   thumbnailCacheDir: string;
   thumbnailMaxSize: number;
   archiveEntryMaxBytes: number;
+  libraryRootAllowedPrefixes: string[];
 }
 
 export interface PathPrefixMapRule {
@@ -24,7 +25,12 @@ export interface PathPrefixMapRule {
 
 const projectRoot = process.cwd();
 
-const defaultPathPrefixMap: PathPrefixMapRule[] = [];
+const defaultPathPrefixMap: PathPrefixMapRule[] = [
+  {
+    from: "/srv/momentpic/imports/",
+    to: "/srv/momentpic/imports/download/"
+  }
+];
 
 const booleanFromEnv = (value: string | undefined, fallback: boolean): boolean => {
   if (value === undefined) return fallback;
@@ -71,13 +77,20 @@ const parsePathPrefixMap = (value: string | undefined): PathPrefixMapRule[] => {
   });
 };
 
+const parsePathList = (value: string | undefined, fallback: string[]): string[] => {
+  const source = value === undefined ? fallback : value.split(",");
+  return source
+    .map((entry) => entry.trim().replace(/\\/g, "/").replace(/\/+$/g, ""))
+    .filter(Boolean);
+};
+
 export const loadConfig = (overrides: Partial<AppConfig> = {}): AppConfig => {
   const port = Number(process.env.PORT ?? 3000);
   return {
     host: process.env.HOST ?? "127.0.0.1",
     port: Number.isFinite(port) ? port : 3000,
     dbPath: process.env.MOMENTPIC_DB_PATH ?? path.resolve(projectRoot, "data", "momentpic-v2.sqlite"),
-    authSecret: process.env.MOMENTPIC_AUTH_SECRET ?? process.env.MOMENTPIC_ADMIN_PASSWORD ?? "change-me-auth-secret",
+    authSecret: process.env.MOMENTPIC_AUTH_SECRET ?? process.env.MOMENTPIC_ADMIN_PASSWORD ?? "change-me-local-dev-secret",
     adminUsername: (process.env.MOMENTPIC_ADMIN_USERNAME ?? "admin").trim().toLowerCase(),
     adminPassword: process.env.MOMENTPIC_ADMIN_PASSWORD ?? "change-me-admin-password",
     cookieName: process.env.MOMENTPIC_COOKIE_NAME ?? "moment_pic_v2_auth",
@@ -88,6 +101,11 @@ export const loadConfig = (overrides: Partial<AppConfig> = {}): AppConfig => {
     thumbnailCacheDir: process.env.MOMENTPIC_THUMBNAIL_CACHE_DIR ?? path.resolve(projectRoot, "data", "thumbnails"),
     thumbnailMaxSize: Math.max(64, Math.min(2048, Math.round(numberFromEnv(process.env.MOMENTPIC_THUMBNAIL_MAX_SIZE, 640)))),
     archiveEntryMaxBytes: Math.max(1024 * 1024, Math.round(numberFromEnv(process.env.MOMENTPIC_ARCHIVE_ENTRY_MAX_BYTES, 64 * 1024 * 1024))),
+    libraryRootAllowedPrefixes: parsePathList(process.env.MOMENTPIC_LIBRARY_ALLOWED_ROOTS, [
+      "/srv/momentpic/media",
+      "/srv/momentpic/photos",
+      "/srv/momentpic/imports"
+    ]),
     ...overrides
   };
 };

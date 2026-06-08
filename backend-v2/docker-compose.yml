@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     network_mode: bridge
     env_file:
-      - path: ./.env
+      - path: /srv/momentpic/appdata/backend-v2/.env
         required: false
     ports:
       - "3211:3211"
@@ -16,9 +16,8 @@ services:
       PORT: "3211"
       MOMENTPIC_DB_PATH: "/app/data/momentpic-v2.sqlite"
       MOMENTPIC_SEED_DEMO: "false"
-      MOMENTPIC_PATH_PREFIX_MAP: '[]'
+      MOMENTPIC_PATH_PREFIX_MAP: '[{"from":"/srv/momentpic/imports/","to":"/srv/momentpic/imports/download/"}]'
       MOMENTPIC_THUMBNAIL_CACHE_DIR: "/app/data/thumbnails"
     volumes:
-      - ./data:/app/data
-      # Optional: mount imported media read-only and set MOMENTPIC_PATH_PREFIX_MAP in .env.
-      # - /path/to/media:/media:ro
+      - /srv/momentpic/appdata/backend-v2/data:/app/data
+      - /srv/momentpic/imports:/srv/momentpic/imports:ro

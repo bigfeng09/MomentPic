@@ -53,9 +53,9 @@ Default exposed URL:
 http://<server-ip>:3211
 ```
 
-The backend serves the built-in Web UI at `/`, so the same URL opens the browser app after login.
+The backend serves the built-in Web UI at `/`, so the same URL opens the browser app after login. The Web UI includes album browsing, favorite-album sync, public share creation and a settings panel for system/account/share/cache/scan status. Current source also includes multi-select album sharing, Chinese IME composition protection, library-root management, dry-run scanning and guarded real scan imports.
 
-For more backend deployment detail, see `backend-v2/docs/DEPLOYMENT.md`.
+For more backend deployment detail, see `backend-v2/docs/UNRAID_DEPLOY_CHECKLIST.md` and adapt the placeholder paths for your own server.
 
 ## Quick start: backend for development
 
@@ -75,14 +75,14 @@ Put your legacy DB somewhere outside git, then run:
 
 ```bash
 cd backend-v2
-npm run verify:legacy -- --legacy-db /path/to/gallery.sqlite
-npm run import:legacy:test -- --legacy-db /path/to/gallery.sqlite
+npm run verify:legacy -- --legacy-db /path/to/legacy.sqlite
+npm run import:legacy:test -- --legacy-db /path/to/legacy.sqlite
 ```
 
 Only after reviewing the test import should you import into the main DB:
 
 ```bash
-MOMENTPIC_DB_PATH=./data/momentpic-v2.sqlite npm run import:legacy -- --legacy-db /path/to/gallery.sqlite
+MOMENTPIC_DB_PATH=./data/momentpic-v2.sqlite npm run import:legacy -- --legacy-db /path/to/legacy.sqlite
 ```
 
 If legacy rows contain old absolute media paths, configure `MOMENTPIC_PATH_PREFIX_MAP` in `.env`.
@@ -107,6 +107,8 @@ Install the APK and set the backend URL to your server, for example:
 ```text
 http://<server-ip>:3211
 ```
+
+The Android client supports library-root dry-run management for admins, album and image actions, normal-account sharing, public shares and single-original downloads. The sanitized default service URL is the Android emulator host example `http://10.0.2.2:3211`.
 
 ## Security notes
 

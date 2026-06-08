@@ -435,11 +435,74 @@ public class MainActivity extends Activity {
         content.addView(dataTitle, dataTitleParams);
 
         if ("admin".equals(role)) {
+            TextView libraryTitle = text("相册库目录", 16, colorText(), true);
+            content.addView(libraryTitle, matchWrapWithTop(12));
+            TextView libraryHint = text("这里填写的是后端/Unraid 服务器上的绝对路径，不是手机本地目录。新增后只登记目录；真实导入或扫描能力以服务端为准。", 12, colorMuted(), false);
+            libraryHint.setLineSpacing(dp(3), 1f);
+            content.addView(libraryHint, matchWrapWithTop(8));
+            EditText libraryNameInput = input("目录名称（可选）", "");
+            EditText libraryPathInput = input("服务器目录路径，例如 /srv/momentpic/photos", "");
+            LinearLayout.LayoutParams libraryNameParams = matchWrapWithTop(10);
+            libraryNameParams.height = dp(50);
+            content.addView(libraryNameInput, libraryNameParams);
+            LinearLayout.LayoutParams libraryPathParams = matchWrapWithTop(10);
+            libraryPathParams.height = dp(50);
+            content.addView(libraryPathInput, libraryPathParams);
+            Button addLibrary = primaryButton("添加相册库目录");
+            addLibrary.setOnClickListener(v -> {
+                String libraryName = libraryNameInput.getText().toString().trim();
+                String libraryPath = libraryPathInput.getText().toString().trim();
+                if (libraryPath.isEmpty()) {
+                    toast("服务器目录路径不能为空");
+                    return;
+                }
+                if (!isServerAbsolutePath(libraryPath)) {
+                    toast("请输入服务端绝对路径，例如 /srv/momentpic/photos");
+                    return;
+                }
+                addLibrary.setEnabled(false);
+                addLibrary.setText("添加中...");
+                new AddGalleryRootTask(libraryName, libraryPath, source -> {
+                    addLibrary.setEnabled(true);
+                    addLibrary.setText("添加相册库目录");
+                    if (source != null) {
+                        libraryNameInput.setText("");
+                        libraryPathInput.setText("");
+                        resetGalleryState();
+                        toast("相册库目录已添加：" + source.name);
+                    }
+                }).execute();
+            });
+            LinearLayout.LayoutParams addLibraryParams = matchWrapWithTop(10);
+            addLibraryParams.height = dp(46);
+            content.addView(addLibrary, addLibraryParams);
+
+            TextView rootsTitle = text("已登记图库来源", 16, colorText(), true);
+            content.addView(rootsTitle, matchWrapWithTop(18));
+            TextView rootsHint = text("可启用/禁用来源，并执行 dry-run 扫描预览。Android 不提供正式导入按钮。", 12, colorMuted(), false);
+            rootsHint.setLineSpacing(dp(3), 1f);
+            content.addView(rootsHint, matchWrapWithTop(8));
+            if (!gallerySourcesLoaded && !loadingGallerySources) {
+                loadingGallerySources = true;
+                new GallerySourcesTask().execute();
+            }
+            if (loadingGallerySources && !gallerySourcesLoaded) {
+                content.addView(text("来源列表加载中...", 13, colorMuted(), false), matchWrapWithTop(10));
+            } else if (gallerySources.isEmpty()) {
+                content.addView(text("暂无图库来源", 13, colorMuted(), false), matchWrapWithTop(10));
+            } else {
+                for (GallerySource source : gallerySources) content.addView(gallerySourceRow(source), matchWrapWithTop(10));
+            }
+
             Button manageUsers = secondaryButton("账户与分享管理");
             manageUsers.setOnClickListener(v -> new LoadUsersTask(false, () -> showUserShareManager()).execute());
             LinearLayout.LayoutParams manageParams = matchWrapWithTop(12);
             manageParams.height = dp(46);
             content.addView(manageUsers, manageParams);
+        } else {
+            TextView adminHint = text("添加相册库目录仅管理员可用；当前账号没有系统目录管理权限。", 12, colorMuted(), false);
+            adminHint.setLineSpacing(dp(3), 1f);
+            content.addView(adminHint, matchWrapWithTop(12));
         }
 
         Button clearCache = secondaryButton("清除图片缓存");
@@ -471,6 +534,34 @@ public class MainActivity extends Activity {
 
         page.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         root.addView(page, fullScreen());
+    }
+
+    private View gallerySourceRow(GallerySource source) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(14), dp(12), dp(14), dp(12));
+        row.setBackground(roundedBackground(colorSurface(), colorStroke(), 14));
+
+        TextView title = text(source.name + (source.enabled ? " · 已启用" : " · 已禁用"), 15, colorText(), true);
+        row.addView(title, matchWrap());
+        TextView path = text(source.path.isEmpty() ? source.prefixKey : source.path, 12, colorMuted(), false);
+        path.setLineSpacing(dp(3), 1f);
+        row.addView(path, matchWrapWithTop(6));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        Button dryRun = secondaryButton("dry-run 扫描");
+        dryRun.setEnabled(source.enabled);
+        dryRun.setAlpha(source.enabled ? 1f : 0.5f);
+        dryRun.setOnClickListener(v -> new GalleryDryRunTask(source).execute());
+        actions.addView(dryRun, new LinearLayout.LayoutParams(0, dp(42), 1));
+        Button toggle = secondaryButton(source.enabled ? "禁用来源" : "启用来源");
+        toggle.setOnClickListener(v -> new ToggleGallerySourceTask(source).execute());
+        LinearLayout.LayoutParams toggleParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+        toggleParams.setMargins(dp(10), 0, 0, 0);
+        actions.addView(toggle, toggleParams);
+        row.addView(actions, matchWrapWithTop(10));
+        return row;
     }
 
     private void showUserShareManager() {
@@ -1069,12 +1160,16 @@ public class MainActivity extends Activity {
                 .setTitle(album.name)
                 .setItems(items, (dialog, which) -> {
                     String action = items[which];
-                    if ("下载相册到本地".equals(action)) new DownloadAlbumTask(album).execute();
+                    if ("下载相册到本地".equals(action)) showBatchAlbumDownloadUnsupported();
                     else if ("生成公开分享链接".equals(action)) new CreatePublicShareTask("album", album.id).execute();
                     else showShareAlbumDialog(album);
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    private void showBatchAlbumDownloadUnsupported() {
+        showError("暂不支持批量下载相册", "后端 V2 当前没有相册 zip 下载 API，Android 不执行批量下载。请进入相册后下载单张原图。");
     }
 
     private void showShareAlbumDialog(Album album) {
@@ -2605,6 +2700,11 @@ public class MainActivity extends Activity {
         return value;
     }
 
+    private boolean isServerAbsolutePath(String path) {
+        String value = path == null ? "" : path.trim().replace('\\', '/');
+        return value.startsWith("/") || value.matches("^[A-Za-z]:/.*");
+    }
+
     @Override
     public void onBackPressed() {
         if (SCREEN_VIEWER.equals(currentScreen) || viewerOpen) {
@@ -2649,6 +2749,10 @@ public class MainActivity extends Activity {
 
     private interface ScanCallback {
         void done(ScanResult result);
+    }
+
+    private interface GalleryRootCallback {
+        void done(GallerySource source);
     }
 
     private interface DoneCallback {
@@ -2698,7 +2802,9 @@ public class MainActivity extends Activity {
             output = getContentResolver().openOutputStream(uri);
             if (output == null) throw new Exception("无法写入媒体文件");
         } else {
-            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Moment Pic" + (albumName == null || albumName.trim().isEmpty() ? "" : "/" + safeFileName(albumName)));
+            File baseDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+            if (baseDir == null) baseDir = getFilesDir();
+            File dir = new File(baseDir, "Moment Pic" + (albumName == null || albumName.trim().isEmpty() ? "" : "/" + safeFileName(albumName)));
             if (!dir.exists() && !dir.mkdirs()) throw new Exception("无法创建目录");
             output = new FileOutputStream(new File(dir, filename));
         }
@@ -2929,6 +3035,35 @@ public class MainActivity extends Activity {
         }
     }
 
+    private class AddGalleryRootTask extends AsyncTask<Void, Void, GallerySource> {
+        private final String name;
+        private final String path;
+        private final GalleryRootCallback callback;
+        private String error;
+
+        AddGalleryRootTask(String name, String path, GalleryRootCallback callback) {
+            this.name = name;
+            this.path = path;
+            this.callback = callback;
+        }
+
+        @Override
+        protected GallerySource doInBackground(Void... voids) {
+            try {
+                return api.addGalleryRoot(name, path);
+            } catch (Exception e) {
+                error = e.getMessage();
+                return null;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(GallerySource source) {
+            if (source == null) showError("添加相册库目录失败", error);
+            callback.done(source);
+        }
+    }
+
     private class GallerySourcesTask extends AsyncTask<Void, Void, List<GallerySource>> {
         @Override
         protected List<GallerySource> doInBackground(Void... voids) {
@@ -2946,6 +3081,7 @@ public class MainActivity extends Activity {
             if (result == null) {
                 if (gallerySources.isEmpty()) gallerySources.add(new GallerySource(serverTitle(), ""));
                 if (SCREEN_ALBUMS.equals(currentScreen)) showAlbums(false);
+                if (SCREEN_SETTINGS.equals(currentScreen)) showSettings();
                 return;
             }
             String before = activeGalleryPrefix;
@@ -2955,7 +3091,72 @@ public class MainActivity extends Activity {
             }
             if (SCREEN_ALBUMS.equals(currentScreen)) {
                 showAlbums(!before.equals(activeGalleryPrefix));
+            } else if (SCREEN_SETTINGS.equals(currentScreen)) {
+                showSettings();
             }
+        }
+    }
+
+    private class ToggleGallerySourceTask extends AsyncTask<Void, Void, GallerySource> {
+        private final GallerySource source;
+        private String error;
+
+        ToggleGallerySourceTask(GallerySource source) {
+            this.source = source;
+        }
+
+        @Override
+        protected GallerySource doInBackground(Void... voids) {
+            try {
+                return api.setGalleryEnabled(source.prefixKey, !source.enabled);
+            } catch (Exception e) {
+                error = e.getMessage();
+                return null;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(GallerySource result) {
+            if (result == null) {
+                showError("更新图库来源失败", error);
+                return;
+            }
+            toast(result.enabled ? "来源已启用" : "来源已禁用");
+            gallerySourcesLoaded = false;
+            new GallerySourcesTask().execute();
+        }
+    }
+
+    private class GalleryDryRunTask extends AsyncTask<Void, Void, GalleryScanSummary> {
+        private final GallerySource source;
+        private String error;
+
+        GalleryDryRunTask(GallerySource source) {
+            this.source = source;
+        }
+
+        @Override
+        protected void onPreExecute() {
+            toast("开始 dry-run 扫描：" + source.name);
+        }
+
+        @Override
+        protected GalleryScanSummary doInBackground(Void... voids) {
+            try {
+                return api.scanGalleryDryRun(source.prefixKey);
+            } catch (Exception e) {
+                error = e.getMessage();
+                return null;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(GalleryScanSummary result) {
+            if (result == null) {
+                showError("dry-run 扫描失败", error);
+                return;
+            }
+            showError("dry-run 扫描结果", result.summaryText());
         }
     }
 
@@ -3154,7 +3355,7 @@ public class MainActivity extends Activity {
         String detail = error == null || error.trim().isEmpty() ? "未知错误" : error.trim();
         return detail
                 + "\n\n当前服务地址：" + (baseUrl == null ? "" : baseUrl)
-                + "\n请确认手机能访问这个地址和端口，并使用你在后端环境变量中配置的账号密码。";
+                + "\n请确认手机能访问这个 LAN 地址和端口，v2 后端已启动，默认账号密码是 admin / change-me-admin-password。";
     }
 
     private static class MomentApi {
@@ -3319,6 +3520,32 @@ public class MainActivity extends Activity {
                 if (!source.prefixKey.isEmpty()) sources.add(source);
             }
             return sources;
+        }
+
+        GallerySource addGalleryRoot(String name, String path) throws Exception {
+            JSONObject body = new JSONObject();
+            if (name != null && !name.trim().isEmpty()) body.put("name", name.trim());
+            body.put("path", path == null ? "" : path.trim());
+            JSONObject data = data(request("POST", "/api/v2/galleries", body.toString()));
+            JSONObject item = data.optJSONObject("item");
+            if (item == null) throw new Exception("gallery create response missing item");
+            return GallerySource.from(item);
+        }
+
+        GallerySource setGalleryEnabled(String galleryId, boolean enabled) throws Exception {
+            JSONObject body = new JSONObject();
+            body.put("enabled", enabled);
+            JSONObject data = data(request("PATCH", "/api/v2/galleries/" + urlEncode(galleryId), body.toString()));
+            JSONObject item = data.optJSONObject("item");
+            if (item == null) throw new Exception("gallery update response missing item");
+            return GallerySource.from(item);
+        }
+
+        GalleryScanSummary scanGalleryDryRun(String galleryId) throws Exception {
+            JSONObject body = new JSONObject();
+            body.put("dryRun", true);
+            JSONObject data = data(request("POST", "/api/v2/galleries/" + urlEncode(galleryId) + "/scan", body.toString(), 120000));
+            return GalleryScanSummary.from(data);
         }
 
         private PageResult<Album> getAlbumsBySourcePrefix(int page, int pageSize, String keyword, String sortBy, String sortOrder, String sourcePrefix) throws Exception {
@@ -3501,15 +3728,68 @@ public class MainActivity extends Activity {
     private static class GallerySource {
         final String name;
         final String prefixKey;
+        final String path;
+        final boolean enabled;
 
         GallerySource(String name, String prefixKey) {
+            this(name, prefixKey, "", true);
+        }
+
+        GallerySource(String name, String prefixKey, String path, boolean enabled) {
             this.name = name == null || name.trim().isEmpty() ? "Moment Pic" : name.trim();
             this.prefixKey = prefixKey == null ? "" : prefixKey.trim();
+            this.path = path == null ? "" : path.trim();
+            this.enabled = enabled;
         }
 
         static GallerySource from(JSONObject json) {
             String name = Album.firstNonEmpty(json.optString("name"), json.optString("path"), json.optString("id"));
-            return new GallerySource(name, json.optString("id"));
+            return new GallerySource(name, json.optString("id"), json.optString("path"), json.optBoolean("enabled", true));
+        }
+    }
+
+    private static class GalleryScanSummary {
+        String galleryName;
+        boolean dryRun;
+        int discoveredAlbums;
+        int discoveredAssets;
+        int albumsToCreate;
+        int albumsToUpdate;
+        int assetsToCreate;
+        int assetsToUpdate;
+        int skippedFiles;
+
+        static GalleryScanSummary from(JSONObject json) {
+            GalleryScanSummary summary = new GalleryScanSummary();
+            summary.galleryName = json.optString("galleryName");
+            summary.dryRun = json.optBoolean("dryRun", true);
+            JSONObject discovered = json.optJSONObject("discovered");
+            if (discovered != null) {
+                summary.discoveredAlbums = discovered.optInt("albums");
+                summary.discoveredAssets = discovered.optInt("assets");
+            }
+            JSONObject changes = json.optJSONObject("changes");
+            if (changes != null) {
+                summary.albumsToCreate = changes.optInt("albumsToCreate");
+                summary.albumsToUpdate = changes.optInt("albumsToUpdate");
+                summary.assetsToCreate = changes.optInt("assetsToCreate");
+                summary.assetsToUpdate = changes.optInt("assetsToUpdate");
+                summary.skippedFiles = changes.optInt("skippedFiles");
+            }
+            return summary;
+        }
+
+        String summaryText() {
+            String title = galleryName == null || galleryName.trim().isEmpty() ? "当前来源" : galleryName.trim();
+            return title
+                    + "\n模式：" + (dryRun ? "dry-run 预览，未写入数据库" : "正式扫描")
+                    + "\n发现相册：" + discoveredAlbums
+                    + "\n发现图片：" + discoveredAssets
+                    + "\n将新增相册：" + albumsToCreate
+                    + "\n将更新相册：" + albumsToUpdate
+                    + "\n将新增图片：" + assetsToCreate
+                    + "\n将更新图片：" + assetsToUpdate
+                    + "\n跳过文件：" + skippedFiles;
         }
     }
 

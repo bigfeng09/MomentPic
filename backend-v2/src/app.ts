@@ -13,6 +13,7 @@ import { galleryRoutes } from "./routes/galleries.js";
 import { healthRoutes } from "./routes/health.js";
 import { scanRoutes } from "./routes/scan.js";
 import { shareRoutes } from "./routes/shares.js";
+import { systemRoutes } from "./routes/system.js";
 import { getWebAppHtml } from "./web-app.js";
 
 declare module "fastify" {
@@ -60,6 +61,7 @@ export const buildApp = async (overrides: Partial<AppConfig> = {}): Promise<Fast
   await app.register(shareRoutes);
   await app.register(scanRoutes);
   await app.register(cacheRoutes);
+  await app.register(systemRoutes);
 
   return app;
 };
