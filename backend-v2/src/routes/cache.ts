@@ -18,6 +18,7 @@ interface AssetRow {
   width: number | null;
   height: number | null;
   size_bytes: number | null;
+  source_mtime: string | null;
   thumbnail_key: string | null;
   created_at: string;
   updated_at: string;
@@ -36,13 +37,15 @@ const toAssetDto = (row: AssetRow): AssetDto => ({
   width: row.width,
   height: row.height,
   sizeBytes: row.size_bytes,
+  sourceMtime: row.source_mtime,
   thumbnailKey: row.thumbnail_key,
   createdAt: row.created_at,
   updatedAt: row.updated_at
 });
 
 const assetSelect =
-  "SELECT id, album_id, name, extension, source_type, source_path, relative_path, zip_entry_path, sort_index, width, height, size_bytes, thumbnail_key, created_at, updated_at FROM assets";
+  "SELECT id, album_id, name, extension, source_type, source_path, relative_path, zip_entry_path, sort_index, width, height, size_bytes, source_mtime, thumbnail_key, created_at, updated_at FROM assets";
+const assetRecentOrder = "COALESCE(source_mtime, updated_at, created_at) DESC, sort_index ASC, name COLLATE NOCASE ASC, id ASC";
 
 const clampLimit = (value: unknown): number => {
   const parsed = Number(value ?? 25);
@@ -83,7 +86,7 @@ export const cacheRoutes = async (app: FastifyInstance): Promise<void> => {
     const rows =
       requestedAssetIds.length > 0
         ? (app.db
-            .prepare(`${assetSelect} WHERE id IN (${requestedAssetIds.map(() => "?").join(", ")}) ORDER BY updated_at DESC, id ASC`)
+            .prepare(`${assetSelect} WHERE id IN (${requestedAssetIds.map(() => "?").join(", ")}) ORDER BY ${assetRecentOrder}`)
             .all(...requestedAssetIds) as unknown as AssetRow[])
         : scope === "covers"
         ? (app.db
@@ -93,12 +96,12 @@ export const cacheRoutes = async (app: FastifyInstance): Promise<void> => {
                  SELECT cover_asset_id FROM albums
                  WHERE cover_asset_id IS NOT NULL ${albumId ? "AND id = ?" : ""}
                )
-               ORDER BY updated_at DESC, id ASC
+               ORDER BY ${assetRecentOrder}
                LIMIT ?`
             )
             .all(...(albumId ? [albumId] : []), limit) as unknown as AssetRow[])
         : (app.db
-            .prepare(`${assetSelect} a WHERE 1=1 ${albumFilter} ORDER BY a.updated_at DESC, a.id ASC LIMIT ?`)
+            .prepare(`${assetSelect} a WHERE 1=1 ${albumFilter} ORDER BY ${assetRecentOrder} LIMIT ?`)
             .all(...params, limit) as unknown as AssetRow[]);
     const candidates = rows.map(toAssetDto);
 

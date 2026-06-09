@@ -30,7 +30,7 @@ npm start
 默认管理员账号：
 
 - 用户名：`admin`
-- 密码：`change-me-admin-password`
+- 密码：`admin123`
 
 本地正式使用前请设置 `MOMENTPIC_ADMIN_PASSWORD` 和 `MOMENTPIC_AUTH_SECRET`。
 
@@ -43,16 +43,16 @@ npm start
 | `MOMENTPIC_DB_PATH` | `data/momentpic-v2.sqlite` | SQLite 数据库路径 |
 | `MOMENTPIC_AUTH_SECRET` | 本地默认值 | cookie token HMAC 密钥 |
 | `MOMENTPIC_ADMIN_USERNAME` | `admin` | seed 管理员用户名 |
-| `MOMENTPIC_ADMIN_PASSWORD` | `change-me-admin-password` | seed 管理员密码 |
+| `MOMENTPIC_ADMIN_PASSWORD` | `admin123` | seed 管理员密码 |
 | `MOMENTPIC_COOKIE_NAME` | `moment_pic_v2_auth` | 登录 cookie 名称 |
 | `MOMENTPIC_COOKIE_TTL_SECONDS` | `86400` | 登录有效期 |
 | `MOMENTPIC_SEED_DEMO` | `true` | 是否写入最小 demo 图库/相册/资源 |
 | `MOMENTPIC_LEGACY_DB_PATH` | 无 | 旧 Moment Pic SQLite 路径，供 `npm run import:legacy` 使用 |
-| `MOMENTPIC_PATH_PREFIX_MAP` | legacy 默认映射 | 文件读取接口的运行时路径前缀映射。未设置时内置 `/example/media/moment/` -> `/example/media/moment/download/`；设置为 `[]` 可关闭默认映射 |
+| `MOMENTPIC_PATH_PREFIX_MAP` | legacy 默认映射 | 文件读取接口的运行时路径前缀映射。未设置时内置 `/mnt/user/media/download/moment/` -> `/mnt/user/media/download/moment/download/`；设置为 `[]` 可关闭默认映射 |
 | `MOMENTPIC_THUMBNAIL_CACHE_DIR` | `data/thumbnails` | 缩略图缓存目录 |
 | `MOMENTPIC_THUMBNAIL_MAX_SIZE` | `640` | 缩略图最长边尺寸，运行时限制在 64 到 2048 之间 |
 | `MOMENTPIC_ARCHIVE_ENTRY_MAX_BYTES` | `67108864` | archive/zip 单个 entry 最大读取大小，默认 64 MiB，最低 1 MiB；超限返回 413 |
-| `MOMENTPIC_LIBRARY_ALLOWED_ROOTS` | `/example/media,/example/photos,/example/media` | 允许登记和扫描的服务端图库来源根，逗号分隔；危险路径如 `/`、`/example/media-root`、`/etc` 会被拒绝 |
+| `MOMENTPIC_LIBRARY_ALLOWED_ROOTS` | `/mnt/user/media,/mnt/user/photos,/mnt/user/media/download` | 允许登记和扫描的服务端图库来源根，逗号分隔；危险路径如 `/`、`/mnt/user`、`/etc` 会被拒绝 |
 
 ## 接口列表
 
@@ -61,10 +61,10 @@ npm start
 - `POST /api/v2/auth/logout`
 - `GET /api/v2/me`
 - `GET /api/v2/system/status` / `PATCH /api/v2/system/config`
-- `GET /api/v2/galleries` / `GET /api/v2/library-roots` / `POST /api/v2/galleries` / `PATCH /api/v2/galleries/:id` / `POST /api/v2/galleries/:id/scan`
-- `GET /api/v2/albums?galleryId=&page=&pageSize=&keyword=&sortBy=&sortOrder=`
+- `GET /api/v2/galleries` / `GET /api/v2/library-roots` / `POST /api/v2/galleries` / `PATCH /api/v2/galleries/:id` / `POST /api/v2/galleries/:id/scan`；列表默认 `library_roots.updated_at DESC`，最近更新的图库来源优先。
+- `GET /api/v2/albums?galleryId=&page=&pageSize=&keyword=&sortBy=&sortOrder=`；默认 `sortBy=updatedAt&sortOrder=desc`，即最近下载/最近更新优先。当前 DB 没有独立 `downloaded_at` 字段，使用 `albums.updated_at` 作为下载/更新时间代理。
 - `GET /api/v2/albums/:albumId`
-- `GET /api/v2/albums/:albumId/assets?page=&pageSize=`
+- `GET /api/v2/albums/:albumId/assets?page=&pageSize=`；默认 `COALESCE(assets.source_mtime, assets.updated_at, assets.created_at) DESC`，即优先按文件 mtime 从最近到最远，缺失时回退资源更新时间/创建时间。
 - `GET /api/v2/assets/:assetId`
 - `GET /api/v2/assets/:assetId/thumbnail`
 - `GET /api/v2/assets/:assetId/original`
@@ -72,7 +72,7 @@ npm start
 - `GET|PUT /api/v2/favorite-albums` / `POST|DELETE /api/v2/favorite-albums/:albumId`
 - `GET|PUT /api/v2/users/:username/shared-albums` / `PUT|DELETE /api/v2/users/:username/shared-albums/:albumId`
 - `POST /api/v2/public-shares` / `DELETE /api/v2/public-shares/:token` / `GET /s/:token`
-- `POST /api/v2/scan` / `GET /api/v2/scan/:taskId` / `GET /api/v2/scan`
+- `POST /api/v2/scan` / `GET /api/v2/scan/:taskId` / `GET /api/v2/scan`，scan 以后台任务执行，POST 立即返回 `taskId`
 - `GET /api/v2/cache/thumbnails/status` / `POST /api/v2/cache/thumbnails/prune` / `POST /api/v2/cache/thumbnails/warmup`
 
 除 health/login 外，`/api/v2/*` 需要登录 cookie。
@@ -80,13 +80,13 @@ npm start
 内置 Web UI：
 
 - `GET /` 返回单文件网页端，无 CDN、无独立前端构建链。
-- 登录后支持图库/相册/图片浏览、收藏状态显示、收藏过滤、收藏/取消收藏、相册/图片公开链接生成与复制。
+- 登录后支持图库/相册/图片浏览、按最近下载/最近更新优先排序、收藏状态显示、全部相册/我的收藏互斥过滤、收藏/取消收藏、相册/图片公开链接生成与复制。
 - 相册主页每个 album card 有 `...` 操作菜单：下载到本地（当前没有相册 zip API，会明确提示不支持批量相册下载）、分享给普通账户、生成公开分享链接。
 - 图片查看器的“图片操作”菜单支持下载原图、分享给普通账户、生成公开分享链接；普通账户授权沿用相册级 `shared_albums`，asset 公开链接沿用 public share token。
 - 设置页参考旧版 Moment Pic 的设置面：系统、账户、分享、缓存、扫描、关于；管理员可管理用户、重置密码、设置 role，维护用户已分享相册列表，并按名称/ID 取消分享；普通用户只显示自身账号状态。
-- 设置页系统面板使用 `GET /api/v2/system/status` 展示 backend URL、health、版本、当前用户、archive readiness、cache status、system_config 轮询/预加载和最近扫描摘要；管理员可用 `PATCH /api/v2/system/config` 修改前后各预加载图片数量，范围 `0-5`。该页面不会渲染 auth secret、密码 hash、DB 路径或媒体绝对路径。管理员可在同一区域添加、启用/禁用图库来源文件夹，提交的是后端/Unraid 服务端绝对路径，例如 `/example/photos`，不是浏览器本地目录。
+- 设置页系统面板使用 `GET /api/v2/system/status` 展示 backend URL、health、版本、当前用户、archive readiness、cache status、system_config 轮询/预加载和最近扫描摘要；管理员可用 `PATCH /api/v2/system/config` 修改前后各预加载图片数量，范围 `0-5`。该页面不会渲染 auth secret、密码 hash、DB 路径或媒体绝对路径。管理员可在同一区域添加、启用/禁用图库来源文件夹，提交的是后端/Unraid 服务端绝对路径，例如 `/mnt/user/photos`，不是浏览器本地目录。
 - 设置页分享支持从“收藏相册最新 50 个”或关键词全库搜索结果中多选相册，支持全选当前结果/清空选择；中文输入使用 composition 保护，组合期间不触发搜索重渲染。
-- 设置页扫描入口默认 `dryRun=true` 预览真实文件系统扫描；正式导入必须显式 `dryRun=false`，后端会先备份 SQLite 主文件和 WAL/SHM。禁用来源只修改系统记录，不删除磁盘真实图片。
+- 设置页扫描入口默认 `dryRun=true` 预览真实文件系统扫描；来源行扫描和设置页扫描会发送 `fast:false`，包含 archive 扫描。正式导入必须显式 `dryRun=false`，后端会先备份 SQLite 主文件和 WAL/SHM。禁用来源只修改系统记录，不删除磁盘真实图片。
 - Web UI 行为边界见 [docs/WEB_UI.md](docs/WEB_UI.md)。
 
 ## 旧库导入
@@ -162,11 +162,11 @@ MOMENTPIC_LEGACY_DB_PATH=/path/to/legacy.sqlite npm run import:legacy -- --dry-r
 
 `GET /api/v2/assets/:assetId/original` 对 `sourceType=folder` 的资源优先读取数据库原始 `sourcePath`，文件不存在时再按 `MOMENTPIC_PATH_PREFIX_MAP` 做运行时前缀映射并 stream 输出；仍不存在返回 404。数据库里的原始路径不会被改写，便于审计 legacy 导入来源。
 
-对 `sourceType=zip`、`sourceType=archive` 且路径是 zip/cbz，或带 `zipEntryPath` 的资源，接口会把 `sourcePath` 解析为本地 zip 文件路径，同样先尝试原路径、再尝试路径前缀映射。entry 优先取 `zipEntryPath`，为空时回退 `relativePath`，再回退 `name`。命中后从 zip 内读取图片 entry，按资源扩展名或 entry 文件名返回 `Content-Type`，并用 entry 未压缩大小设置 `Content-Length`。
+对 `sourceType=zip`、`sourceType=archive`，或带 `zipEntryPath` 的资源，接口会把 `sourcePath` 解析为本地 archive 文件路径，同样先尝试原路径、再尝试路径前缀映射。entry 优先取 `zipEntryPath`，为空时回退 `relativePath`，再回退 `name`。zip/cbz 内置使用 yauzl lazy entries，读取原图优先 stream；7z/cb7 在系统存在 `7z`/`7zz`/`7za` 时用 `7z e -so` stream。PSD entry 会尝试提取内嵌 JPEG 后再交给原图/缩略图路径。
 
 `GET /api/v2/assets/:assetId/thumbnail` 对 `sourceType=folder` 且可解析为本地图片文件的资源，会按最长边 `MOMENTPIC_THUMBNAIL_MAX_SIZE` 生成 JPEG 缩略图，并缓存到 `MOMENTPIC_THUMBNAIL_CACHE_DIR`。缓存 key 包含资源 ID、解析后的源路径、源文件大小、源文件 mtime 和目标尺寸；源文件或尺寸变化后会自动生成新的缓存文件。
 
-archive/zip 图片 entry 的 thumbnail 使用同一套 sharp 生成逻辑，但不会把 entry 解压写到任意路径，而是按单 entry 大小限制读入内存后交给 sharp。archive thumbnail 缓存 key 包含资源 ID、解析后的 archive 路径、archive 文件大小和 mtime、entry path、entry 未压缩大小、压缩大小、CRC 和目标尺寸，避免不同 zip 或不同 entry 混淆。
+archive 图片 entry 的 thumbnail 使用同一套 sharp 生成逻辑，但不会把 entry 解压写到任意路径，而是按单 entry 大小限制读入内存后交给 sharp。archive thumbnail 缓存 key 包含资源 ID、解析后的 archive 路径、archive 文件大小和 mtime、entry path、entry 未压缩大小、压缩大小、CRC 和目标尺寸，避免不同 archive 或不同 entry 混淆。
 
 ```text
 X-MomentPic-Thumbnail-Cache: generated|hit|fallback
@@ -183,7 +183,7 @@ X-MomentPic-Path-Mapped: true|false
 Unraid legacy 默认映射等价于：
 
 ```bash
-MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/example/media/moment/","to":"/example/media/moment/download/"}]'
+MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/mnt/user/media/download/moment/","to":"/mnt/user/media/download/moment/download/"}]'
 ```
 
 也支持简单格式：
@@ -196,9 +196,9 @@ MOMENTPIC_PATH_PREFIX_MAP='/old/prefix/=/new/prefix/'
 
 部署建议：正式导入前先用少量 legacy `folder` 资源抽样确认原路径不存在、映射后路径存在；上线后观察读取接口的 404、`X-MomentPic-Path-Mapped` 和 `X-MomentPic-Thumbnail-Cache` 比例。
 
-archive/zip 当前只支持 zip/cbz 容器内的普通图片 entry。entry 路径会拒绝绝对路径、盘符路径、空 segment、`.`/`..` segment 和目录 entry，防止 zip slip/path traversal；读取失败不会在响应里暴露系统路径。entry 不存在返回 404；entry 超过 `MOMENTPIC_ARCHIVE_ENTRY_MAX_BYTES` 返回 413；无效 zip 返回 415；非 zip archive 格式返回 501。可通过 `GET /api/v2/archive/readiness` 查看 zip 内置支持和 rar/7z 外部命令探测结果。回滚 archive 读取能力需要回退本次代码或在导入前继续避免把 archive 资源暴露给读取入口；不需要修改 SQLite 数据。
+archive 当前识别 zip/cbz、rar/cbr、7z/cb7。zip/cbz 内置可读，并使用 `decodeStrings:false` 按 UTF-8 flag 解码文件名，非 UTF-8 名称会尝试 GBK 以兼容中文文件名；读取仍保持 lazy entries。7z/cb7 依赖系统 `7z`/`7zz`/`7za`，缺失时返回 501/readiness unavailable。rar/cbr 在当前构建没有 `node-unrar-js`，会 graceful 返回 501，不会崩溃。entry 路径会拒绝绝对路径、盘符路径、空 segment、`.`/`..` segment、目录 entry 和 `__MACOSX`，防止 path traversal；读取失败不会在响应里暴露系统路径。entry 不存在返回 404；entry 超过 `MOMENTPIC_ARCHIVE_ENTRY_MAX_BYTES` 返回 413；无效 archive 返回 415。可通过 `GET /api/v2/archive/readiness` 查看 zip、rar/cbr、7z/cb7 可用性。回滚 archive 读取能力需要回退本次代码或在导入前继续避免把 archive 资源暴露给读取入口；不需要修改 SQLite 数据。
 
-rar/cbr/7z/cb7 当前会在读取前返回 501，并在响应头 `X-MomentPic-Archive-Readiness` 与错误文案里提示 readiness。当前本机没有 `7z`、`7zz`、`7za`、`unrar`、`bsdtar`、`unar`，也没有 V2 内置 rar/7z JS 依赖；不要通过 `apt install` 临时补依赖。
+rar/cbr 当前会在读取前返回 501，并在响应头 `X-MomentPic-Archive-Readiness` 与错误文案里提示 readiness。7z/cb7 如果部署环境有 `7z`/`7zz`/`7za` 则可读取和扫描；没有时同样 graceful unavailable。当前没有引入 V2 内置 rar JS 依赖；不要通过临时系统安装绕过部署流程。
 
 ## 用户、收藏与分享
 
@@ -213,9 +213,11 @@ rar/cbr/7z/cb7 当前会在读取前返回 501，并在响应头 `X-MomentPic-Ar
 
 ## 扫描与缓存生命周期
 
-- `POST /api/v2/galleries/:id/scan` 支持真实文件系统扫描。默认 `dryRun=true` 只返回将新增/更新/跳过的 albums/assets 计数和样本；`dryRun=false` 会先备份 SQLite 主文件和 WAL/SHM 到 DB 同目录 `scan-backups/scan-*`，然后 upsert `albums`/`assets`，不删除磁盘文件，也不删除 DB 中已存在但本次未发现的历史记录。
-- `POST /api/v2/scan` 仍兼容旧入口；无 `galleryId` 且 `dryRun=true` 时返回 DB 内已知数量并记录 task，带 `galleryId` 时转到对应图库来源扫描。普通用户调用扫描接口返回 `403`。
-- 第一版扫描规则：root 本身如果含图片则作为一个相册，root 的直接子目录各作为一个相册；支持 jpg/jpeg/png/webp/gif/bmp/avif/heic/heif 普通图片文件。zip/cbz 读取能力保持不变，但真实扫描导入第一版不主动导入 zip/cbz。
+- 首页相册列表顶部提供“快速刷新”和“完整刷新”。快速刷新提交 `{ "dryRun": false, "fast": true }`，跳过 archive 深度解析，只刷新普通图片；完整刷新提交 `{ "dryRun": false, "fast": false }`，包含 zip/cbz、7z/cb7（有 7z 命令时）和 rar/cbr graceful skipped。两者都会写 SQLite 但不删除磁盘文件，也不删除 DB 中已存在但本次未发现的历史记录。
+- `POST /api/v2/galleries/:id/scan` 支持真实文件系统扫描。默认 `dryRun=true` 创建后台预览任务；`dryRun=false` 创建后台正式导入任务。正式导入执行时会先备份 SQLite 主文件和 WAL/SHM 到 DB 同目录 `scan-backups/scan-*`，然后 upsert `albums`/`assets`。
+- `POST /api/v2/scan` 仍兼容旧入口；POST 立即返回 `202`、`taskId` 和 `queued/running` 状态，前端或客户端轮询 `GET /api/v2/scan/:taskId` 查询 `completed/failed`。`GET /api/v2/scan` 会返回最近任务列表和 `latestActive`，Web UI 页面刷新后会恢复 queued/running task 轮询。默认 `dryRun=true`，显式 `dryRun=false` 才写库；默认 `fast=true`，显式 `fast:false` 才扫描 archive。不带 `galleryId` 时扫描所有已启用图库来源，带 `galleryId` 时只扫描对应来源。运行中阶段写入 `progressPhase`（`walking`/`folders`/`archives`/`writing`），不会写入 `error`；`error` 仅表示真实失败或部分来源错误。旧数据里的 `error='phase:*'` 会兼容映射为 `progressPhase`，不会作为真实错误返回。单个来源不可读或未挂载会进入 task `error`，不会阻断其他来源。
+- 扫描是增量写入：已存在的普通文件在 `source_path`、`relative_path`、`zip_entry_path`、`sort_index`、`size_bytes`、`source_mtime` 未变化时跳过图片 metadata 读取和 asset upsert；zip/cbz entry 按 archive 路径、entry path、排序、entry size、archive mtime 判断未变化并跳过 upsert；album 在 `source_path`、`source_mtime`、`assets_fingerprint`、`asset_count` 都未变化时跳过 album upsert。task DTO 返回 `unchangedAlbums`、`unchangedAssets` 和 `skippedFiles`。
+- 扫描规则：root 本身和任意层级子目录只要直接包含图片就作为相册；支持 jpg/jpeg/png/webp/gif/bmp/avif/heic/heif 普通图片文件；完整扫描会把 archive 作为独立相册导入，entry 写入 `assets.zip_entry_path` 并可通过 archive 原图/缩略图接口读取。archive 中 root 图片和 nested 图片同时存在时，会按总 size 选择更像主体图片的一组，忽略目录、非图片、加密 entry 和 `__MACOSX`。
 - 缩略图缓存 status/prune 只作用于 `MOMENTPIC_THUMBNAIL_CACHE_DIR` 下 `.jpg` 缓存文件，不会删除原图或 SQLite。
 - warmup 默认 `dryRun=true`，支持 `scope=covers|assets`、`albumId`、`assetIds` 和单次最多 100 个候选；`dryRun=false` 时同步小批量生成或命中缩略图，并返回 generated/hit/missing/failed 等计数。
 
@@ -245,16 +247,15 @@ npm run check:archive-samples -- --limit 20 --top 8
 - 收藏相册 API 与 legacy favorite_albums 关系导入
 - 用户-相册分享授权 API 与非管理员访问限制
 - 公开分享 token API、`/s/:token` HTML 访问页和 token-scoped 公开图片二进制读取
-- scan dry-run/status/list 骨架
+- scan 后台任务、快速/完整刷新、active task 恢复、分批 upsert
 - thumbnail cache status/prune/warmup 小批量执行
-- rar/cbr/7z/cb7 graceful 501
+- zip/cbz archive 读取，7z/cb7 系统命令读取，rar/cbr graceful 501
 - Fastify inject smoke 脚本
 
 未实现：
 
-- 真正文件系统图库扫描与写入更新
 - 缩略图后台预热任务
-- rar/7z 等非 zip archive 真解压读取
+- rar/cbr 内置 `node-unrar-js` 真解压读取
 
 旧库迁移入口：
 

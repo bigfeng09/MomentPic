@@ -214,7 +214,7 @@ const webAppHtml = String.raw`<!doctype html>
 
       .filters {
         display: grid;
-        grid-template-columns: minmax(180px, 1fr) minmax(140px, 220px) auto auto;
+        grid-template-columns: minmax(180px, 1fr) minmax(140px, 220px) auto auto auto;
         gap: 10px;
         margin: 22px 0 18px;
       }
@@ -330,8 +330,8 @@ const webAppHtml = String.raw`<!doctype html>
 
       .album-menu-btn {
         position: absolute;
-        top: 8px;
-        left: 8px;
+        right: 8px;
+        bottom: 8px;
         z-index: 4;
         background: rgba(255, 253, 248, .94);
         box-shadow: 0 8px 18px rgba(50, 43, 31, .14);
@@ -657,18 +657,25 @@ const webAppHtml = String.raw`<!doctype html>
         position: relative;
         display: grid;
         place-items: center;
+        overflow: hidden;
         min-height: 0;
         padding: 0 12px 18px;
       }
 
       .viewer-stage img {
         display: block;
-        max-width: 100%;
-        max-height: 100%;
+        width: 100%;
+        height: 100%;
+        max-width: calc(100vw - 24px);
+        max-height: calc(100vh - 88px);
         object-fit: contain;
         pointer-events: none;
         position: relative;
         z-index: 1;
+        transform: translate(var(--viewer-pan-x, 0px), var(--viewer-pan-y, 0px)) scale(var(--viewer-zoom, 1));
+        transform-origin: center center;
+        transition: transform .08s ease-out;
+        will-change: transform;
       }
 
       .viewer-nav-zone {
@@ -846,7 +853,8 @@ const webAppHtml = String.raw`<!doctype html>
               <input id="search-input" class="input" placeholder="搜索相册" autocomplete="off">
               <select id="gallery-select" class="select" aria-label="图库"></select>
               <button id="search-btn" class="btn primary" type="button">搜索</button>
-              <button id="favorite-filter-btn" class="btn" type="button">收藏</button>
+              <button id="all-albums-filter-btn" class="btn active" type="button">全部相册</button>
+              <button id="favorite-filter-btn" class="btn" type="button">我的收藏</button>
             </div>
             <div class="layout">
               <aside class="side">
@@ -857,9 +865,14 @@ const webAppHtml = String.raw`<!doctype html>
                 <div class="panel-head">
                   <div>
                     <h2>相册</h2>
-                    <p id="album-count">正在读取...</p>
+                    <p id="album-count">正在读取... · 最近下载/最近更新优先</p>
+                  </div>
+                  <div class="action-row">
+                    <button id="home-refresh-scan-btn" class="btn primary" type="button">增量刷新</button>
+                    <button id="home-full-scan-btn" class="btn" type="button">全量刷新</button>
                   </div>
                 </div>
+                <div id="home-scan-status" class="status" role="status"></div>
                 <div id="albums-status" class="status" role="status"></div>
                 <div id="album-grid" class="album-grid"></div>
                 <div class="pager">
@@ -1000,6 +1013,9 @@ const webAppHtml = String.raw`<!doctype html>
           assetPageSize: 120,
           assetPagination: null,
           currentAsset: null,
+          viewerZoom: 1,
+          viewerPanX: 0,
+          viewerPanY: 0,
           view: "albums",
           settingsTab: "system",
           systemStatus: null,
@@ -1015,7 +1031,10 @@ const webAppHtml = String.raw`<!doctype html>
           shareAlbumSearchTimer: null,
           selectedShareAlbumIds: new Set(),
           shareAlbumSearchComposing: false,
-          pendingUserShare: null
+          pendingUserShare: null,
+          scanTaskId: "",
+          scanPollTimer: null,
+          scanRecoverChecked: false
         };
 
         const $ = (id) => document.getElementById(id);
@@ -1156,7 +1175,7 @@ const webAppHtml = String.raw`<!doctype html>
           nameField.innerHTML = '<span>目录名称（可选）</span><input id="new-gallery-name" class="input" autocomplete="off" placeholder="Unraid Photos">';
           const pathField = document.createElement("label");
           pathField.className = "field";
-          pathField.innerHTML = '<span>服务器绝对路径</span><input id="new-gallery-path" class="input mono" autocomplete="off" placeholder="/example/photos" required>';
+          pathField.innerHTML = '<span>服务器绝对路径</span><input id="new-gallery-path" class="input mono" autocomplete="off" placeholder="/mnt/user/photos" required>';
           const submit = document.createElement("button");
           submit.id = "add-gallery-btn";
           submit.className = "btn primary";
@@ -1199,9 +1218,9 @@ const webAppHtml = String.raw`<!doctype html>
           if (tab === "about") renderAboutPanel();
         };
 
-        const updateFavoriteFilterButton = () => {
+        const updateAlbumScopeButtons = () => {
+          $("all-albums-filter-btn").classList.toggle("active", !state.favoriteOnly);
           $("favorite-filter-btn").classList.toggle("active", state.favoriteOnly);
-          $("favorite-filter-btn").textContent = state.favoriteOnly ? "全部相册" : "收藏";
         };
 
         const switchScreen = (name) => {
@@ -1323,7 +1342,26 @@ const webAppHtml = String.raw`<!doctype html>
           if (username === state.selectedShareUser) await loadSharedAlbums(username);
         };
 
+        const toggleAlbumFavorite = async (album) => {
+          if (!album?.id) return;
+          const favored = state.favorites.has(album.id);
+          await api("/api/v2/favorite-albums/" + encodeURIComponent(album.id), {
+            method: favored ? "DELETE" : "POST",
+            body: "{}"
+          });
+          if (favored) state.favorites.delete(album.id);
+          else state.favorites.add(album.id);
+          if (state.currentAlbum?.id === album.id) updateFavoriteButton();
+          renderAlbums();
+          setStatus("albums-status", favored ? "已取消收藏：" + album.name : "已收藏：" + album.name);
+          if (state.favoriteOnly && favored) await loadAlbums();
+        };
+
         const albumActions = (album) => [
+          {
+            label: state.favorites.has(album.id) ? "取消收藏" : "收藏相册",
+            run: async () => toggleAlbumFavorite(album)
+          },
           {
             label: "下载到本地",
             run: async () => setStatus("albums-status", "当前不支持批量下载相册；请打开相册后在单张照片菜单下载原图。", true)
@@ -1409,7 +1447,8 @@ const webAppHtml = String.raw`<!doctype html>
           const grid = $("album-grid");
           grid.textContent = "";
           const page = state.albumPagination;
-          setText("album-count", page ? page.total + " 个相册" : "");
+          const scope = state.favoriteOnly ? "我的收藏" : "全部相册";
+          setText("album-count", page ? scope + " · " + page.total + " 个相册 · 最近下载/最近更新优先" : "");
           setText("page-info", page ? page.page + " / " + Math.max(1, page.totalPages) : "");
           $("prev-page").disabled = !page || page.page <= 1;
           $("next-page").disabled = !page || page.page >= page.totalPages;
@@ -1501,6 +1540,11 @@ const webAppHtml = String.raw`<!doctype html>
             if (state.favoriteOnly) {
               const data = await api("/api/v2/favorite-albums");
               let items = data.items || [];
+              items.sort((left, right) => {
+                const leftTime = Date.parse(left.updatedAt || left.createdAt || "") || 0;
+                const rightTime = Date.parse(right.updatedAt || right.createdAt || "") || 0;
+                return rightTime - leftTime || String(left.id || "").localeCompare(String(right.id || ""));
+              });
               if (state.galleryId) items = items.filter((album) => album.galleryId === state.galleryId);
               if (state.keyword) {
                 const keyword = state.keyword.toLowerCase();
@@ -1528,7 +1572,7 @@ const webAppHtml = String.raw`<!doctype html>
             setStatus("albums-status", "");
             renderGalleries();
             renderAlbums();
-            updateFavoriteFilterButton();
+            updateAlbumScopeButtons();
           } catch (error) {
             if (error.status === 401) return requireLogin();
             setStatus("albums-status", error.message, true);
@@ -1546,6 +1590,7 @@ const webAppHtml = String.raw`<!doctype html>
             await loadMe();
             await Promise.all([loadGalleries(), loadFavorites(), loadSystemStatus()]);
             await loadAlbums();
+            await recoverActiveScanTask();
           } catch (error) {
             if (error.status === 401) return requireLogin();
             setStatus("albums-status", error.message, true);
@@ -1640,8 +1685,52 @@ const webAppHtml = String.raw`<!doctype html>
           }
         };
 
+        const applyViewerTransform = () => {
+          const img = $("viewer-img");
+          img.style.setProperty("--viewer-zoom", String(state.viewerZoom));
+          img.style.setProperty("--viewer-pan-x", state.viewerPanX + "px");
+          img.style.setProperty("--viewer-pan-y", state.viewerPanY + "px");
+        };
+
+        const resetViewerTransform = () => {
+          state.viewerZoom = 1;
+          state.viewerPanX = 0;
+          state.viewerPanY = 0;
+          applyViewerTransform();
+        };
+
+        const clampViewerPan = () => {
+          if (state.viewerZoom <= 1) {
+            state.viewerPanX = 0;
+            state.viewerPanY = 0;
+            return;
+          }
+          const rect = $("viewer-img").parentElement.getBoundingClientRect();
+          const maxX = Math.max(0, (rect.width * (state.viewerZoom - 1)) / 2);
+          const maxY = Math.max(0, (rect.height * (state.viewerZoom - 1)) / 2);
+          state.viewerPanX = Math.max(-maxX, Math.min(maxX, state.viewerPanX));
+          state.viewerPanY = Math.max(-maxY, Math.min(maxY, state.viewerPanY));
+        };
+
+        const zoomViewerAt = (clientX, clientY, deltaY) => {
+          if (!state.currentAsset) return;
+          const previousZoom = state.viewerZoom;
+          const zoomFactor = deltaY < 0 ? 1.18 : 1 / 1.18;
+          const nextZoom = Math.max(1, Math.min(6, previousZoom * zoomFactor));
+          if (Math.abs(nextZoom - previousZoom) < 0.001) return;
+          const rect = $("viewer-img").parentElement.getBoundingClientRect();
+          const offsetX = clientX - (rect.left + rect.width / 2);
+          const offsetY = clientY - (rect.top + rect.height / 2);
+          state.viewerPanX = offsetX - ((offsetX - state.viewerPanX) * nextZoom) / previousZoom;
+          state.viewerPanY = offsetY - ((offsetY - state.viewerPanY) * nextZoom) / previousZoom;
+          state.viewerZoom = nextZoom;
+          clampViewerPan();
+          applyViewerTransform();
+        };
+
         const openViewer = (asset) => {
           state.currentAsset = asset;
+          resetViewerTransform();
           setText("viewer-title", asset.name);
           $("viewer-img").src = imageUrl(asset.id, "original");
           $("viewer-img").alt = asset.name;
@@ -1656,6 +1745,7 @@ const webAppHtml = String.raw`<!doctype html>
           $("viewer").classList.remove("active");
           $("viewer").setAttribute("aria-hidden", "true");
           $("viewer-img").src = "";
+          resetViewerTransform();
           state.currentAsset = null;
           updateViewerNav();
         };
@@ -1781,7 +1871,12 @@ const webAppHtml = String.raw`<!doctype html>
             makeInfoBox("Backend URL", status.backendUrl, true),
             makeInfoBox("Health", (status.health?.status || "unknown") + " · " + (status.health?.version || "v2")),
             makeInfoBox("登录用户", (status.user?.username || "") + " · " + (status.user?.role || "")),
-            makeInfoBox("Archive readiness", archive.zip?.status || "unknown"),
+            makeInfoBox(
+              "Archive readiness",
+              "zip/cbz " + (archive.zip?.status || "unknown") +
+                " · rar/cbr " + (archive.rar?.status || "unknown") +
+                " · 7z/cb7 " + (archive.sevenZip?.status || "unknown")
+            ),
             makeInfoBox("Cache status", (cache.files || 0) + " files · " + formatBytes(cache.bytes || 0)),
             makeInfoBox("图库数据", (status.counts?.galleries || 0) + " 图库 · " + (status.counts?.albums || 0) + " 相册 · " + (status.counts?.assets || 0) + " 图片"),
             makeInfoBox("轮询", config.enablePolling ? "开启 · " + config.pollingInterval + " ms" : "关闭"),
@@ -1849,16 +1944,107 @@ const webAppHtml = String.raw`<!doctype html>
           try {
             const data = await api("/api/v2/galleries/" + encodeURIComponent(galleryId) + "/scan", {
               method: "POST",
-              body: JSON.stringify({ dryRun })
+              body: JSON.stringify({ dryRun, fast: false })
             });
             $("scan-result").textContent = "";
             $("scan-result").appendChild(makeResultBox(dryRun ? "扫描 dry-run 预览" : "正式扫描导入", data));
-            await loadGalleries();
-            await loadSystemStatus();
-            renderSystemPanel();
-            setStatus("settings-status", dryRun ? "扫描预览完成：" + gallery.name : "正式导入完成：" + gallery.name);
+            pollScanTask(data.taskId, "settings-status", dryRun ? "扫描预览" : "正式导入");
           } catch (error) {
             setStatus("settings-status", error.message, true);
+          }
+        };
+
+        const stopScanPoll = () => {
+          if (state.scanPollTimer) window.clearTimeout(state.scanPollTimer);
+          state.scanPollTimer = null;
+        };
+
+        const scanStatusText = (task, label) => {
+          const prefix = label ? label + "：" : "";
+          const count = "相册 " + (task.albumsDiscovered || 0) + " / 图片 " + (task.assetsDiscovered || 0);
+          const unchanged = "跳过未变化 相册 " + (task.unchangedAlbums || 0) + " / 图片 " + (task.unchangedAssets || 0);
+          const skipped = task.skippedFiles ? " · 错误/不支持 " + task.skippedFiles : "";
+          const phase = task.progressPhase ? " · 阶段 " + task.progressPhase : "";
+          if (task.status === "queued") return prefix + "已排队 · " + task.taskId;
+          if (task.status === "running") return prefix + "运行中 · " + task.taskId + phase + " · " + count;
+          if (task.status === "completed") return prefix + "完成 · " + count + " · " + unchanged + skipped + (task.error ? " · 部分错误：" + task.error : "");
+          if (task.status === "failed") return prefix + "失败 · " + (task.error || task.taskId);
+          return prefix + task.status + " · " + task.taskId;
+        };
+
+        const pollScanTask = async (taskId, statusId, label) => {
+          stopScanPoll();
+          state.scanTaskId = taskId || "";
+          if (!taskId) return;
+          const poll = async () => {
+            try {
+              const task = await api("/api/v2/scan/" + encodeURIComponent(taskId));
+              const failed = task.status === "failed";
+              setStatus(statusId, scanStatusText(task, label), failed);
+              if (statusId !== "home-scan-status") setStatus("home-scan-status", scanStatusText(task, label), failed);
+              if (task.status === "completed") {
+                stopScanPoll();
+                await Promise.all([loadGalleries(), loadSystemStatus()]);
+                if (state.view === "albums") await loadAlbums();
+                if (!$("settings-view").classList.contains("hidden")) renderSystemPanel();
+                return;
+              }
+              if (task.status === "failed") {
+                stopScanPoll();
+                await loadSystemStatus();
+                if (!$("settings-view").classList.contains("hidden")) renderSystemPanel();
+                return;
+              }
+              state.scanPollTimer = window.setTimeout(poll, 1200);
+            } catch (error) {
+              stopScanPoll();
+              setStatus(statusId, error.message, true);
+            }
+          };
+          await poll();
+        };
+
+        const recoverActiveScanTask = async () => {
+          if (state.scanRecoverChecked || state.user?.role !== "admin") return;
+          state.scanRecoverChecked = true;
+          try {
+            const data = await api("/api/v2/scan");
+            const task = data.latestActive || (data.items || []).find((item) => item.status === "queued" || item.status === "running");
+            if (task?.taskId) await pollScanTask(task.taskId, "home-scan-status", "恢复扫描任务");
+          } catch (error) {
+            if (error.status !== 401 && error.status !== 403) setStatus("home-scan-status", error.message, true);
+          }
+        };
+
+        const refreshLibraryFromHome = async (full = false) => {
+          if (state.user?.role !== "admin") return setStatus("home-scan-status", "只有管理员可以刷新图库", true);
+          const scope = state.galleryId ? "当前图库来源" : "全部启用图库来源";
+          const confirmed = window.confirm(
+            (full ? "全量刷新" : "增量刷新") +
+              scope +
+              "？本次会发送 dryRun=false，" +
+              (full
+                ? "会遍历整个相册库，重新读取已知相册和 zip/cbz/rar/cbr/7z/cb7 archive；不可用格式会跳过并记录。"
+                : "用于发现新增相册文件夹和新增压缩包；已入库相册内容变化请使用全量刷新。") +
+              " 后台写入新增/更新记录；不会删除磁盘文件，也不会删除历史记录。"
+          );
+          if (!confirmed) return;
+          $("home-refresh-scan-btn").disabled = true;
+          $("home-full-scan-btn").disabled = true;
+          setStatus("home-scan-status", "正在创建后台刷新任务...");
+          try {
+            const data = await api("/api/v2/scan", {
+              method: "POST",
+              body: JSON.stringify({ dryRun: false, fast: !full, galleryId: state.galleryId || undefined })
+            });
+            $("home-refresh-scan-btn").disabled = false;
+            $("home-full-scan-btn").disabled = false;
+            setStatus("home-scan-status", "刷新任务已提交：" + data.taskId);
+            await pollScanTask(data.taskId, "home-scan-status", full ? "全量刷新" : "增量刷新");
+          } catch (error) {
+            $("home-refresh-scan-btn").disabled = false;
+            $("home-full-scan-btn").disabled = false;
+            setStatus("home-scan-status", error.message, true);
           }
         };
 
@@ -2049,7 +2235,7 @@ const webAppHtml = String.raw`<!doctype html>
           row.append(userField, albumField, share);
           const help = document.createElement("span");
           help.className = "help-text";
-          help.textContent = "默认显示收藏相册最新 50 个；输入关键词搜索全库相册，最多 50 条；中文输入 compositionstart/compositionend 期间不触发搜索重渲染。";
+          help.textContent = "默认显示收藏相册最新 50 个；输入关键词搜索全库相册，最多 50 条。";
           const selected = document.createElement("span");
           selected.className = "help-text";
           selected.textContent = state.selectedShareAlbumIds.size > 0
@@ -2280,10 +2466,18 @@ const webAppHtml = String.raw`<!doctype html>
           state.albumPage = 1;
           loadAlbums();
         });
-        $("favorite-filter-btn").addEventListener("click", () => {
-          state.favoriteOnly = !state.favoriteOnly;
+        $("all-albums-filter-btn").addEventListener("click", () => {
+          if (!state.favoriteOnly) return;
+          state.favoriteOnly = false;
           state.albumPage = 1;
-          updateFavoriteFilterButton();
+          updateAlbumScopeButtons();
+          loadAlbums();
+        });
+        $("favorite-filter-btn").addEventListener("click", () => {
+          if (state.favoriteOnly) return;
+          state.favoriteOnly = true;
+          state.albumPage = 1;
+          updateAlbumScopeButtons();
           loadAlbums();
         });
         $("prev-page").addEventListener("click", () => {
@@ -2299,16 +2493,7 @@ const webAppHtml = String.raw`<!doctype html>
         $("back-btn").addEventListener("click", backToAlbums);
         $("favorite-btn").addEventListener("click", async () => {
           if (!state.currentAlbum) return;
-          const favored = state.favorites.has(state.currentAlbum.id);
-          await api("/api/v2/favorite-albums/" + encodeURIComponent(state.currentAlbum.id), {
-            method: favored ? "DELETE" : "POST",
-            body: "{}"
-          });
-          if (favored) state.favorites.delete(state.currentAlbum.id);
-          else state.favorites.add(state.currentAlbum.id);
-          updateFavoriteButton();
-          renderAlbums();
-          if (state.favoriteOnly && favored) loadAlbums();
+          await toggleAlbumFavorite(state.currentAlbum);
         });
         $("share-album-btn").addEventListener("click", async () => {
           if (!state.currentAlbum) return;
@@ -2341,6 +2526,11 @@ const webAppHtml = String.raw`<!doctype html>
         $("viewer").addEventListener("click", (event) => {
           if (event.target === $("viewer")) closeViewer();
         });
+        $("viewer-img").parentElement.addEventListener("wheel", (event) => {
+          if (!$("viewer").classList.contains("active")) return;
+          event.preventDefault();
+          zoomViewerAt(event.clientX, event.clientY, event.deltaY);
+        }, { passive: false });
         $("share-asset-btn").addEventListener("click", async (event) => {
           if (!state.currentAsset) return;
           event.stopPropagation();
@@ -2414,14 +2604,16 @@ const webAppHtml = String.raw`<!doctype html>
         });
         $("scan-dryrun-btn").addEventListener("click", async () => {
           try {
-            const data = await api("/api/v2/scan", { method: "POST", body: JSON.stringify({ dryRun: true, galleryId: state.galleryId || undefined }) });
+            const data = await api("/api/v2/scan", { method: "POST", body: JSON.stringify({ dryRun: true, fast: false, galleryId: state.galleryId || undefined }) });
             $("scan-result").textContent = "";
-            $("scan-result").appendChild(makeResultBox("扫描 dry-run", data));
-            await loadSettings();
+            $("scan-result").appendChild(makeResultBox("全量扫描 dry-run", data));
+            await pollScanTask(data.taskId, "settings-status", "全量扫描 dry-run");
           } catch (error) {
             setStatus("settings-status", error.message, true);
           }
         });
+        $("home-refresh-scan-btn").addEventListener("click", () => refreshLibraryFromHome(false));
+        $("home-full-scan-btn").addEventListener("click", () => refreshLibraryFromHome(true));
         window.addEventListener("keydown", (event) => {
           if (event.key === "Escape") closeViewer();
         });

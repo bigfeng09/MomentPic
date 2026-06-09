@@ -50,6 +50,7 @@ export interface AssetDto {
   width: number | null;
   height: number | null;
   sizeBytes: number | null;
+  sourceMtime: string | null;
   thumbnailKey: string | null;
   createdAt: string;
   updatedAt: string;

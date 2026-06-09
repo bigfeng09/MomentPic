@@ -124,8 +124,13 @@ CREATE TABLE IF NOT EXISTS scan_tasks (
   started_at TEXT,
   finished_at TEXT,
   error TEXT,
+  progress_phase TEXT,
+  fast_scan INTEGER NOT NULL DEFAULT 1,
   albums_discovered INTEGER NOT NULL DEFAULT 0,
-  assets_discovered INTEGER NOT NULL DEFAULT 0
+  assets_discovered INTEGER NOT NULL DEFAULT 0,
+  skipped_files INTEGER NOT NULL DEFAULT 0,
+  unchanged_albums INTEGER NOT NULL DEFAULT 0,
+  unchanged_assets INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_albums_library_root_id ON albums (library_root_id);
@@ -133,6 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_albums_name ON albums (name);
 CREATE INDEX IF NOT EXISTS idx_albums_updated_at ON albums (updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_assets_album_id ON assets (album_id);
 CREATE INDEX IF NOT EXISTS idx_assets_album_sort ON assets (album_id, sort_index);
+CREATE INDEX IF NOT EXISTS idx_assets_album_recent ON assets (album_id, source_mtime DESC, updated_at DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_assets_thumbnail_key ON assets (thumbnail_key);
 CREATE INDEX IF NOT EXISTS idx_shared_albums_username ON shared_albums (username, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_favorite_albums_username ON favorite_albums (username, updated_at DESC);

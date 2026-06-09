@@ -26,14 +26,14 @@ Both DBs report the same archive-related shape:
 
 - `assets.source_type`: `zip=560312`, `folder=203789`
 - archive candidate assets: `560312`
-- archive source path prefix: `/example/media/moment`
+- archive source path prefix: `/mnt/user/media/download/moment`
 - entry path availability: `zip_entry_path=560312`, `relative_path=0`, `name_only=0`, `missing_all=0`
 - archive candidate `size_bytes`: known `560312`, min `0 B`, average about `2.85 MiB`, max about `96.16 MiB`
 
 Runtime path-prefix map used by the check:
 
 ```text
-/example/media/moment/ -> /example/media/moment/download/
+/mnt/user/media/download/moment/ -> /mnt/user/media/download/moment/download/
 ```
 
 Sample verification result on this host:
@@ -49,14 +49,14 @@ Sample verification result on this host:
 Local blocker:
 
 ```text
-/example/media-root is not mounted on this host, so the real legacy archive files cannot be opened locally.
+/mnt/user is not mounted on this host, so the real legacy archive files cannot be opened locally.
 ```
 
 Because no sampled archive file was accessible, this run did not validate real `original` streaming or real archive thumbnail generation. The existing synthetic smoke test still covers zip original/thumbnail behavior with generated local zip assets.
 
 ## Next step
 
-Run the same command on a host where `/example/media/moment` or the mapped `/example/media/moment/download` tree is mounted read-only. A useful acceptance target for the next slice is:
+Run the same command on a host where `/mnt/user/media/download/moment` or the mapped `/mnt/user/media/download/moment/download` tree is mounted read-only. A useful acceptance target for the next slice is:
 
 - at least a small sample has readable archive paths after prefix mapping,
 - sampled `zip_entry_path` values exist inside the zip/cbz files,

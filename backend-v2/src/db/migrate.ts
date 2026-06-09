@@ -11,6 +11,11 @@ const ensureColumn = (db: Database, tableName: string, columnName: string, defin
 export const migrate = (db: Database): void => {
   db.exec(schemaSql);
   ensureColumn(db, "users", "password_reset_required", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "scan_tasks", "progress_phase", "TEXT");
+  ensureColumn(db, "scan_tasks", "fast_scan", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "scan_tasks", "skipped_files", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "scan_tasks", "unchanged_albums", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "scan_tasks", "unchanged_assets", "INTEGER NOT NULL DEFAULT 0");
   const now = new Date().toISOString();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (1, 'initial_v2_schema', ?)").run(now);
   db.prepare(

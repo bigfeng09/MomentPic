@@ -27,6 +27,7 @@ interface ArchiveAssetRow {
   width: number | null;
   height: number | null;
   size_bytes: number | string | null;
+  source_mtime: string | null;
   thumbnail_key: string | null;
   created_at: string;
   updated_at: string;
@@ -224,6 +225,7 @@ const toAssetDto = (row: ArchiveAssetRow): AssetDto => ({
   width: row.width,
   height: row.height,
   sizeBytes: parseSize(row.size_bytes),
+  sourceMtime: row.source_mtime,
   thumbnailKey: row.thumbnail_key,
   createdAt: row.created_at,
   updatedAt: row.updated_at
@@ -319,7 +321,7 @@ const readArchiveSamples = (db: DatabaseSync, limit: number): AssetDto[] =>
   (
     db
       .prepare(
-        `SELECT id, album_id, name, extension, source_type, source_path, relative_path, zip_entry_path, sort_index, width, height, size_bytes, thumbnail_key, created_at, updated_at
+        `SELECT id, album_id, name, extension, source_type, source_path, relative_path, zip_entry_path, sort_index, width, height, size_bytes, source_mtime, thumbnail_key, created_at, updated_at
          FROM assets
          WHERE ${archiveWhereClause}
            AND source_path IS NOT NULL

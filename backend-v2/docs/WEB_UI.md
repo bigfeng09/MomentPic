@@ -2,11 +2,25 @@
 
 `GET /` 返回内置单页 Web UI，无 CDN、无独立前端构建链。网页端通过登录 cookie 调用 `/api/v2/*`。
 
+## 首页：刷新图库
+
+相册首页顶部提供“快速刷新”和“完整刷新”按钮：
+
+- 仅管理员可用。
+- 当前选择“全部图库”时调用 `POST /api/v2/scan`；选择某个图库时带上 `galleryId`。
+- “快速刷新”用于真正导入新增/更新的普通图片，发送 `{ "dryRun": false, "fast": true }`，跳过 archive 深度解析。
+- “完整刷新”发送 `{ "dryRun": false, "fast": false }`，包含 zip/cbz、7z/cb7（部署环境有 `7z`/`7zz`/`7za` 时）和 rar/cbr graceful skipped。
+- 点击前会弹窗确认：会写入 SQLite，后端会备份 DB，不删除磁盘图片，也不删除历史记录。
+- 后端立即返回 `taskId` 和 `queued/running` 状态；页面轮询 `GET /api/v2/scan/:taskId`，显示排队、运行中、完成、失败和错误信息。
+- 页面进入 app 后会调用 `GET /api/v2/scan`，如果返回 `latestActive` 或列表中有 `queued/running` task，会恢复轮询，避免刷新浏览器后丢失任务状态。
+- 运行中如果接口返回 `progressPhase`，页面显示阶段 `walking`/`folders`/`archives`/`writing`；只有失败或完成时存在真实错误时才显示 `error`。
+- 任务完成后自动刷新图库侧栏、相册列表和系统状态。
+
 ## 设置页：图库来源文件夹
 
 设置页的“系统”区域提供“添加图库来源文件夹”和来源列表：
 
-- 管理员可填写目录名称和服务器绝对路径，例如 `/example/photos`。
+- 管理员可填写目录名称和服务器绝对路径，例如 `/mnt/user/photos`。
 - 目录名称可留空，后端会从路径末段生成默认名称。
 - 表单调用 `POST /api/v2/galleries`。
 - 成功后刷新图库侧栏、图库下拉框、系统状态和已登记来源列表，并提示先做 dry-run 扫描预览。
@@ -61,7 +75,10 @@
 
 设置页“扫描”和来源列表的扫描按钮默认安全 dry-run：
 
-- 来源行“扫描预览”调用 `POST /api/v2/galleries/:id/scan`，请求 `{ "dryRun": true }`，真实读取该服务端目录并返回将新增/更新/跳过的 albums/assets 计数和样本，但不写 DB。
-- “正式导入”会先弹确认，随后发送 `{ "dryRun": false }`；后端先备份 SQLite 主文件和 WAL/SHM，再 upsert albums/assets。
+- 来源行“扫描预览”调用 `POST /api/v2/galleries/:id/scan`，请求 `{ "dryRun": true, "fast": false }`，真实读取该服务端目录并在后台任务完成后返回 discovered 计数，但不写 DB。
+- “正式导入”会先弹确认，随后发送 `{ "dryRun": false, "fast": false }`；后端任务先备份 SQLite 主文件和 WAL/SHM，再 upsert albums/assets。
+- 所有扫描按钮都会先拿到 `taskId`，再轮询 `GET /api/v2/scan/:taskId` 显示排队、运行中、完成或失败。
+- 完成状态会显示“跳过未变化”计数；这些文件/entry 已经在 DB 中存在且路径、entry path、大小、mtime 和相册 fingerprint 没变，后端不会重复解析 metadata 或重复 upsert。
+- 运行中状态显示 `progressPhase` 阶段；`error` 只用于失败或完成时的部分错误，不用于展示进度。
 - 正式导入不删除磁盘文件，也不删除 DB 中本次未发现的历史记录。
-- 扫描规则第一版：root 本身含图片时作为相册，root 直接子目录各作为相册；支持常见图片格式，zip/cbz 导入留后续。
+- 扫描规则：root 本身和任意层级子目录只要直接包含图片就作为相册；支持常见图片格式；完整扫描会把 archive 作为独立相册导入。zip/cbz 内置可用，7z/cb7 依赖系统 7z 命令，rar/cbr 当前构建 graceful unavailable。archive 内 root 图片和 nested 图片同时存在时，按总 size 选择主体图片组，并忽略目录、非图片、加密 entry 和 `__MACOSX`。

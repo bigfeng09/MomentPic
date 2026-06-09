@@ -1,8 +1,8 @@
 const dangerousPaths = new Set([
   "/",
   "/mnt",
-  "/example/media-root",
-  "/example/appdata",
+  "/mnt/user",
+  "/mnt/user/appdata",
   "/boot",
   "/etc",
   "/root",

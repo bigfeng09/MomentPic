@@ -14,12 +14,14 @@ import { healthRoutes } from "./routes/health.js";
 import { scanRoutes } from "./routes/scan.js";
 import { shareRoutes } from "./routes/shares.js";
 import { systemRoutes } from "./routes/system.js";
+import { createScanTaskRunner, type ScanTaskRunner } from "./services/scan-task-runner.js";
 import { getWebAppHtml } from "./web-app.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     config: AppConfig;
     db: Database;
+    scanTasks: ScanTaskRunner;
   }
 }
 
@@ -34,6 +36,7 @@ export const buildApp = async (overrides: Partial<AppConfig> = {}): Promise<Fast
   const app = Fastify({ logger: true });
   app.decorate("config", config);
   app.decorate("db", db);
+  app.decorate("scanTasks", createScanTaskRunner(db, config));
 
   app.addHook("onRequest", async (request, reply) => {
     if (!request.url.startsWith("/api/v2/") || publicPaths.has(request.url.split("?")[0] ?? request.url)) return;

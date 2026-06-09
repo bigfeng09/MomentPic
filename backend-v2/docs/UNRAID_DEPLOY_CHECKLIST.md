@@ -19,7 +19,7 @@ HOST=0.0.0.0
 PORT=3000
 MOMENTPIC_DB_PATH=/path/to/momentpic-v2.sqlite
 MOMENTPIC_SEED_DEMO=false
-MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/example/media/moment/","to":"/actual/readable/media/path/"}]'
+MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/mnt/user/media/download/moment/","to":"/actual/readable/media/path/"}]'
 MOMENTPIC_THUMBNAIL_CACHE_DIR=/path/to/writable/thumbnail-cache
 MOMENTPIC_THUMBNAIL_MAX_SIZE=640
 MOMENTPIC_ARCHIVE_ENTRY_MAX_BYTES=67108864
@@ -43,7 +43,7 @@ Run from `projects/MomentPicBackendV2` before deployment:
 npm run typecheck
 npm run smoke
 MOMENTPIC_SEED_DEMO=false \
-MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/example/media/moment/","to":"/actual/readable/media/path/"}]' \
+MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/mnt/user/media/download/moment/","to":"/actual/readable/media/path/"}]' \
 npm run preflight:main-import -- \
   --legacy-db data/legacy-real-dryrun.sqlite \
   --target-db data/momentpic-v2.sqlite

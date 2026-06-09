@@ -5,9 +5,9 @@ import { fail } from "../lib/api.js";
 import {
   archiveReadiness,
   isArchiveAsset,
+  openArchiveEntryBody,
   readArchiveEntryBuffer,
   resolveArchiveEntry,
-  openArchiveEntryStream,
   type ArchiveEntryError
 } from "./archive-zip.js";
 import { resolveReadableAssetPath } from "./path-prefix-mapping.js";
@@ -24,6 +24,7 @@ const mimeByExtension: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
   ".png": "image/png",
+  ".psd": "image/jpeg",
   ".tif": "image/tiff",
   ".tiff": "image/tiff",
   ".webp": "image/webp"
@@ -49,13 +50,13 @@ const streamFile = (reply: FastifyReply, filePath: string, stat: fs.Stats, conte
 export const sendArchiveError = (reply: FastifyReply, error: ArchiveEntryError) => {
   if (error.status === "not-found") return reply.status(404).send(fail(4003, "asset archive entry not found"));
   if (error.status === "too-large") return reply.status(413).send(fail(4130, "asset archive entry is too large"));
-  if (error.status === "invalid-format") return reply.status(415).send(fail(4152, "asset archive is not a readable zip file"));
+  if (error.status === "invalid-format") return reply.status(415).send(fail(4152, "asset archive is not a readable archive file"));
   if (error.status === "unsupported-entry") return reply.status(415).send(fail(4151, "asset archive entry is unsupported"));
   const readiness = archiveReadiness();
   reply.header("X-MomentPic-Archive-Readiness", readiness.external.status);
   return reply
     .status(501)
-    .send(fail(5010, `archive format unavailable; zip/cbz is built in, rar/cbr/7z/cb7 need one of: ${readiness.external.checkedCommands.join(", ")}`));
+    .send(fail(5010, `archive format unavailable; expected zip/cbz/rar/cbr/7z/cb7 support from: ${readiness.external.checkedCommands.join(", ")}`));
 };
 
 const sendArchiveAssetFile = async (
@@ -69,16 +70,13 @@ const sendArchiveAssetFile = async (
 
     reply.header("X-MomentPic-Path-Mapped", resolved.archive.mapped ? "true" : "false");
     reply.header("Content-Type", contentTypeFor(asset, resolved.entryPath));
+    const body = await openArchiveEntryBody(resolved);
+    if (Buffer.isBuffer(body)) {
+      reply.header("Content-Length", String(body.length));
+      return reply.send(body);
+    }
     reply.header("Content-Length", String(resolved.entry.uncompressedSize));
-    const stream = await openArchiveEntryStream(resolved);
-    reply.raw.once("close", () => {
-      try {
-        resolved.zipFile.close();
-      } catch {
-        // The stream close handler may already have closed the zip file.
-      }
-    });
-    return reply.send(stream);
+    return reply.send(body);
   }
 
   if (!isThumbnailableImageAsset(asset)) {

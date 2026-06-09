@@ -23,6 +23,7 @@ http://10.0.2.2:3211
 ```
 
 The app stores the URL locally. Use the menu button in the top-right corner to change it later.
+The login screen includes a remember-password checkbox. Passwords are stored locally only after a successful login when the checkbox is enabled; a successful login with the checkbox disabled clears the saved password.
 
 The app uses BackendV2 APIs for login, galleries, albums, assets, thumbnails, originals, public shares, and album sharing to normal users.
 Album batch ZIP download is not exposed because BackendV2 has no album ZIP API; download a single original image from the image viewer instead.
@@ -38,9 +39,17 @@ Normal-account sharing is always album-level. The app does not create private pe
 Settings now keeps connection and appearance options on the main page, with two peer entries:
 
 - Account management: admin-only; creates/updates/deletes normal accounts and manages album sharing. Non-admin users see an explicit permission notice.
-- Data management: contains album library directory registration, registered gallery source list, source enable/disable, `dryRun=true` scan preview, image cache clearing, and search history clearing. Source management is admin-only; non-admin users see an explicit permission notice while local cleanup remains available.
+- Data management: contains album library directory registration, registered gallery source list, source enable/disable, `dryRun=true` scan preview, incremental import, full-library import, image cache clearing, and search history clearing. Source management is admin-only; non-admin users see an explicit permission notice while local cleanup remains available.
 
 Admin users can add an album library directory by entering a server-side absolute path such as `/app/media/photos`.
 This path is submitted to BackendV2 as a library root; it is not an Android local folder picker.
 Admins can enable or disable registered sources and run a `dryRun=true` scan preview from Android.
-Android does not expose `dryRun=false` real import in this build.
+The album list refresh button runs a real incremental refresh with `dryRun=false, fast=true`; it is intended to discover newly added album folders and archive albums.
+Data management also exposes per-source incremental import and full-library import. Full-library import uses `fast=false` and traverses the whole selected source, including archive deep parsing.
+
+Album loading is optimized for large libraries:
+
+- The gallery-source list is loaded in parallel when the album screen opens, so the title/switcher no longer waits for album pagination to finish.
+- Normal album pages use a small in-memory page cache keyed by server, account, query, sort, and gallery source.
+- The first album page requests 24 albums to reduce initial cover fetch pressure on mobile networks.
+- Album and grid thumbnails are decoded with sampling, while full-screen originals remain full quality.

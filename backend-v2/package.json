@@ -11,6 +11,7 @@
     "migrate": "npm run build --silent && node dist/src/db/migrate.js",
     "seed": "npm run build --silent && node dist/src/db/seed.js",
     "smoke": "npm run build && node dist/scripts/smoke.js",
+    "test:scan-import": "npm run build --silent && node dist/scripts/scan-import-test.js",
     "import:legacy": "npm run build --silent && node dist/scripts/import-legacy-db.js",
     "import:legacy:test": "npm run build --silent && node dist/scripts/legacy-import-test.js",
     "preflight:main-import": "npm run build --silent && node dist/scripts/preflight-main-import.js",
@@ -19,7 +20,9 @@
     "check:archive-samples": "npm run build --silent && node dist/scripts/check-archive-samples.js"
   },
   "dependencies": {
+    "7zip-bin": "^5.2.0",
     "fastify": "^5.2.1",
+    "node-unrar-js": "^2.0.2",
     "sharp": "^0.34.5",
     "yauzl": "^3.4.0"
   },

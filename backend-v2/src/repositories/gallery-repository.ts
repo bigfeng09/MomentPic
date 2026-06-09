@@ -50,7 +50,7 @@ export class GalleryRepository {
          FROM library_roots lr
          LEFT JOIN albums a ON a.library_root_id = lr.id
          GROUP BY lr.id
-         ORDER BY lr.name COLLATE NOCASE ASC`
+         ORDER BY lr.updated_at DESC, lr.created_at DESC, lr.name COLLATE NOCASE ASC, lr.id ASC`
       )
       .all() as unknown as GalleryRow[];
     return rows.map(toGalleryDto);

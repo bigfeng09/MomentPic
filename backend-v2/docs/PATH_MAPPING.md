@@ -19,8 +19,8 @@ Both the real legacy dry-run DB and the isolated v2 import-test DB have matching
 Relevant path fields:
 
 - `library_roots.path`:
-  - disabled root `瞬间LINK`: `/example/media/moment/link-new-clean`
-  - enabled root `Moment 图片库`: `/example/media/moment`
+  - disabled root `瞬间LINK`: `/mnt/user/media/download/moment/link-new-clean`
+  - enabled root `Moment 图片库`: `/mnt/user/media/download/moment`
 - `albums.source_type`: `zip=5262`, `folder=2741`
 - `assets.source_type`: `zip=560312`, `folder=203789`
 - `albums.source_path`: no empty paths
@@ -36,19 +36,19 @@ The Unraid check used a temporary OpenSSH `SSH_ASKPASS` helper and only ran `tes
 
 Observed existing directories:
 
-- `/example/appdata/moment-pic`
-- `/example/media`
-- `/example/media/moment`
-- `/example/media/moment/link-new-clean`
+- `/mnt/user/appdata/moment-pic`
+- `/mnt/user/media/download`
+- `/mnt/user/media/download/moment`
+- `/mnt/user/media/download/moment/link-new-clean`
 
-Observed shallow entries under `/example/media/moment`:
+Observed shallow entries under `/mnt/user/media/download/moment`:
 
 - `create_hardlinks.py`
 - `download`
 - `link`
 - `link-new-clean`
 
-Initial exact-path samples from the legacy DB did not exist under `/example/media/moment/<album-or-file>`. Targeted basename search found those names under `/example/media/moment/download/...`, with some folder assets also mirrored under `link-new-clean`.
+Initial exact-path samples from the legacy DB did not exist under `/mnt/user/media/download/moment/<album-or-file>`. Targeted basename search found those names under `/mnt/user/media/download/moment/download/...`, with some folder assets also mirrored under `link-new-clean`.
 
 Mapping sample result:
 
@@ -64,7 +64,7 @@ Mapping sample result:
 For file-read endpoints after the real import, keep the stored legacy DB paths unchanged for auditability, but resolve existing files with this host path prefix mapping:
 
 ```text
-/example/media/moment/ -> /example/media/moment/download/
+/mnt/user/media/download/moment/ -> /mnt/user/media/download/moment/download/
 ```
 
 Do not use `link-new-clean` as the primary mapping for the enabled legacy root. It is only partial in the sample. It can be kept as a fallback candidate for disabled/link-library paths or later cleanup work.
@@ -98,7 +98,7 @@ X-MomentPic-Path-Mapped: true|false
 Default mapping when `MOMENTPIC_PATH_PREFIX_MAP` is not set:
 
 ```bash
-MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/example/media/moment/","to":"/example/media/moment/download/"}]'
+MOMENTPIC_PATH_PREFIX_MAP='[{"from":"/mnt/user/media/download/moment/","to":"/mnt/user/media/download/moment/download/"}]'
 ```
 
 Operational notes:

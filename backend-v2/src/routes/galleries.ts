@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { fail, ok } from "../lib/api.js";
 import { GalleryRepository } from "../repositories/gallery-repository.js";
-import { scanLibraryRoot } from "../services/library-scanner.js";
 
 export const galleryRoutes = async (app: FastifyInstance): Promise<void> => {
   const galleries = new GalleryRepository(app.db);
@@ -51,15 +50,11 @@ export const galleryRoutes = async (app: FastifyInstance): Promise<void> => {
   app.post("/api/v2/galleries/:id/scan", async (request, reply) => {
     if (!requireAdmin(request, reply)) return;
     const { id } = request.params as { id: string };
-    const body = request.body as { dryRun?: unknown } | undefined;
+    const body = request.body as { dryRun?: unknown; fast?: unknown } | undefined;
     const dryRun = body?.dryRun !== false;
-    try {
-      const result = await scanLibraryRoot(app.db, app.config, id, dryRun);
-      return ok(result);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "gallery scan failed";
-      const status = message === "gallery not found" ? 404 : 400;
-      return reply.status(status).send(fail(status === 404 ? 4004 : 4000, message));
-    }
+    const gallery = app.db.prepare("SELECT id FROM library_roots WHERE id = ?").get(id) as { id: string } | undefined;
+    if (!gallery) return reply.status(404).send(fail(4004, "gallery not found"));
+    const task = app.scanTasks.enqueue({ dryRun, galleryId: id, createdBy: request.authUser!.username, fast: body?.fast === true });
+    return reply.status(202).send(ok({ ...task, message: "scan task queued; poll GET /api/v2/scan/" + encodeURIComponent(task.taskId) }));
   });
 };

@@ -15,6 +15,7 @@ interface AssetRow {
   width: number | null;
   height: number | null;
   size_bytes: number | null;
+  source_mtime: string | null;
   thumbnail_key: string | null;
   created_at: string;
   updated_at: string;
@@ -33,6 +34,7 @@ const toAssetDto = (row: AssetRow): AssetDto => ({
   width: row.width,
   height: row.height,
   sizeBytes: row.size_bytes,
+  sourceMtime: row.source_mtime,
   thumbnailKey: row.thumbnail_key,
   createdAt: row.created_at,
   updatedAt: row.updated_at
@@ -47,10 +49,10 @@ export class AssetRepository {
     const total = (this.db.prepare("SELECT COUNT(*) AS total FROM assets WHERE album_id = ?").get(albumId) as { total: number }).total;
     const rows = this.db
       .prepare(
-        `SELECT id, album_id, name, extension, source_type, source_path, relative_path, zip_entry_path, sort_index, width, height, size_bytes, thumbnail_key, created_at, updated_at
+        `SELECT id, album_id, name, extension, source_type, source_path, relative_path, zip_entry_path, sort_index, width, height, size_bytes, source_mtime, thumbnail_key, created_at, updated_at
          FROM assets
          WHERE album_id = ?
-         ORDER BY sort_index ASC, name COLLATE NOCASE ASC
+         ORDER BY COALESCE(source_mtime, updated_at, created_at) DESC, sort_index ASC, name COLLATE NOCASE ASC, id ASC
          LIMIT ? OFFSET ?`
       )
       .all(albumId, pageSize, (page - 1) * pageSize) as unknown as AssetRow[];
@@ -63,7 +65,7 @@ export class AssetRepository {
   findById(assetId: string): AssetDto | null {
     const row = this.db
       .prepare(
-        `SELECT id, album_id, name, extension, source_type, source_path, relative_path, zip_entry_path, sort_index, width, height, size_bytes, thumbnail_key, created_at, updated_at
+        `SELECT id, album_id, name, extension, source_type, source_path, relative_path, zip_entry_path, sort_index, width, height, size_bytes, source_mtime, thumbnail_key, created_at, updated_at
          FROM assets
          WHERE id = ?`
       )

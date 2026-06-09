@@ -23,6 +23,35 @@ const writeZipFile = async (zipPath: string, entries: Array<{ entryPath: string;
   });
 };
 
+const waitForScanTask = async (
+  appInstance: Awaited<ReturnType<typeof buildApp>>,
+  taskId: string,
+  cookie: string
+): Promise<{ status: string; dryRun: boolean; albumsDiscovered: number; assetsDiscovered: number; error?: string | null }> => {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const healthDuringScan = await appInstance.inject({ method: "GET", url: "/api/v2/health" });
+    if (healthDuringScan.statusCode !== 200) throw new Error(`health blocked during scan: ${healthDuringScan.statusCode} ${healthDuringScan.body}`);
+    const status = await appInstance.inject({ method: "GET", url: `/api/v2/scan/${taskId}`, headers: { cookie } });
+    if (status.statusCode !== 200) throw new Error(`scan status failed: ${status.statusCode} ${status.body}`);
+    const data = JSON.parse(status.body).data as {
+      status: string;
+      dryRun: boolean;
+      albumsDiscovered: number;
+      assetsDiscovered: number;
+      error?: string | null;
+      progressPhase?: string | null;
+    };
+    if (data.status === "running" && data.error != null) throw new Error(`running scan returned error: ${status.body}`);
+    if (data.progressPhase && !["walking", "folders", "archives", "writing"].includes(data.progressPhase)) {
+      throw new Error(`scan returned invalid progressPhase: ${status.body}`);
+    }
+    if (data.status === "completed") return data;
+    if (data.status === "failed") throw new Error(`scan task failed: ${status.body}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`scan task did not finish: ${taskId}`);
+};
+
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentpic-v2-smoke-"));
 const legacyPrefix = path.join(tempDir, "legacy-prefix") + path.sep;
 const runtimePrefix = path.join(tempDir, "runtime-prefix") + path.sep;
@@ -49,13 +78,21 @@ if (
   !webRoot.body.includes('id="settings-view"') ||
   !webRoot.body.includes('id="gallery-add-panel"') ||
   !webRoot.body.includes('id="library-roots-panel"') ||
+  !webRoot.body.includes('id="all-albums-filter-btn"') ||
   !webRoot.body.includes('id="favorite-filter-btn"') ||
+  !webRoot.body.includes("全部相册") ||
+  !webRoot.body.includes("我的收藏") ||
+  !webRoot.body.includes("最近下载/最近更新优先") ||
+  !webRoot.body.includes('id="home-refresh-scan-btn"') ||
+  !webRoot.body.includes('id="home-full-scan-btn"') ||
+  !webRoot.body.includes('id="home-scan-status"') ||
   !webRoot.body.includes('id="action-menu"') ||
   !webRoot.body.includes('id="share-dialog"') ||
   !webRoot.body.includes("/api/v2/system/status") ||
   !webRoot.body.includes("/api/v2/system/config") ||
   !webRoot.body.includes("/api/v2/auth/login") ||
   !webRoot.body.includes("/api/v2/galleries") ||
+  !webRoot.body.includes("/api/v2/scan/") ||
   !webRoot.body.includes("/api/v2/favorite-albums") ||
   !webRoot.body.includes("/api/v2/albums?page=1&pageSize=50") ||
   !webRoot.body.includes("预加载图片数量") ||
@@ -73,10 +110,19 @@ if (
   !webRoot.body.includes('id="viewer-prev-zone"') ||
   !webRoot.body.includes('id="viewer-next-zone"') ||
   !webRoot.body.includes("changeViewerAsset") ||
+  !webRoot.body.includes("zoomViewerAt") ||
+  !webRoot.body.includes("--viewer-zoom") ||
+  !webRoot.body.includes('addEventListener("wheel"') ||
   !webRoot.body.includes("图片操作") ||
   !webRoot.body.includes("下载到本地") ||
   !webRoot.body.includes("生成公开分享链接") ||
   !webRoot.body.includes("真实扫描导入") ||
+  !webRoot.body.includes("增量刷新") ||
+  !webRoot.body.includes("全量刷新") ||
+  !webRoot.body.includes("用于发现新增相册文件夹和新增压缩包") ||
+  !webRoot.body.includes("会遍历整个相册库") ||
+  !webRoot.body.includes("recoverActiveScanTask") ||
+  !webRoot.body.includes("fast: !full") ||
   !webRoot.body.includes("图库来源文件夹") ||
   !webRoot.body.includes("正式导入必须 dryRun=false") ||
   !webRoot.body.includes("后端/Unraid 服务端路径，不是浏览器本地目录") ||
@@ -115,6 +161,139 @@ const urls = [
 for (const url of urls) {
   const response = await app.inject({ method: "GET", url, headers: { cookie: authHeader } });
   if (response.statusCode !== 200) throw new Error(`${url} failed: ${response.statusCode} ${response.body}`);
+}
+
+app.db
+  .prepare(
+    "INSERT INTO albums (id, library_root_id, name, source_type, source_path, source_mtime, assets_fingerprint, cover_asset_id, asset_count, scan_status, created_at, updated_at) VALUES (?, 'gallery-demo', ?, 'folder', ?, ?, ?, NULL, 0, 'ready', ?, ?)"
+  )
+  .run(
+    "album-sort-older",
+    "Sort Older Album",
+    "/demo/moment-pic/sort-older",
+    "2026-01-01T00:00:00.000Z",
+    "sort-older",
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z"
+  );
+app.db
+  .prepare(
+    "INSERT INTO albums (id, library_root_id, name, source_type, source_path, source_mtime, assets_fingerprint, cover_asset_id, asset_count, scan_status, created_at, updated_at) VALUES (?, 'gallery-demo', ?, ?, ?, ?, ?, NULL, 0, 'ready', ?, ?)"
+  )
+  .run(
+    "album-sort-newer",
+    "Sort Newer Album",
+    "folder",
+    "/demo/moment-pic/sort-newer",
+    "2026-02-01T00:00:00.000Z",
+    "sort-newer",
+    "2026-02-01T00:00:00.000Z",
+    "2026-02-01T00:00:00.000Z"
+  );
+const defaultSortedAlbums = await app.inject({
+  method: "GET",
+  url: "/api/v2/albums?keyword=Sort&page=1&pageSize=2",
+  headers: { cookie: authHeader }
+});
+const defaultSortedAlbumItems = JSON.parse(defaultSortedAlbums.body).data.items as Array<{ id: string; updatedAt: string }>;
+if (
+  defaultSortedAlbums.statusCode !== 200 ||
+  defaultSortedAlbumItems[0]?.id !== "album-sort-newer" ||
+  defaultSortedAlbumItems[1]?.id !== "album-sort-older"
+) {
+  throw new Error(`default albums sort should be updatedAt desc: ${defaultSortedAlbums.statusCode} ${defaultSortedAlbums.body}`);
+}
+
+app.db
+  .prepare(
+    "INSERT INTO albums (id, library_root_id, name, source_type, source_path, source_mtime, assets_fingerprint, cover_asset_id, asset_count, scan_status, created_at, updated_at) VALUES (?, 'gallery-demo', ?, 'folder', ?, ?, ?, NULL, 2, 'ready', ?, ?)"
+  )
+  .run(
+    "album-sort-assets",
+    "Sort Assets Album",
+    "/demo/moment-pic/sort-assets",
+    "2026-02-01T00:00:00.000Z",
+    "sort-assets",
+    "2026-02-01T00:00:00.000Z",
+    "2026-02-01T00:00:00.000Z"
+  );
+const insertSortAsset = app.db.prepare(
+  "INSERT INTO assets (id, album_id, name, extension, source_type, source_path, relative_path, sort_index, width, height, size_bytes, source_mtime, thumbnail_key, created_at, updated_at) VALUES (?, 'album-sort-assets', ?, '.jpg', 'folder', ?, ?, ?, 10, 10, 10, ?, ?, ?, ?)"
+);
+insertSortAsset.run(
+  "asset-sort-older",
+  "older.jpg",
+  "/demo/moment-pic/sort-assets/older.jpg",
+  "sort-assets/older.jpg",
+  1,
+  "2026-01-01T00:00:00.000Z",
+  "sort/assets/older",
+  "2026-03-01T00:00:00.000Z",
+  "2026-03-01T00:00:00.000Z"
+);
+insertSortAsset.run(
+  "asset-sort-newer",
+  "newer.jpg",
+  "/demo/moment-pic/sort-assets/newer.jpg",
+  "sort-assets/newer.jpg",
+  2,
+  "2026-02-01T00:00:00.000Z",
+  "sort/assets/newer",
+  "2026-01-01T00:00:00.000Z",
+  "2026-01-01T00:00:00.000Z"
+);
+const defaultSortedAssets = await app.inject({
+  method: "GET",
+  url: "/api/v2/albums/album-sort-assets/assets?page=1&pageSize=2",
+  headers: { cookie: authHeader }
+});
+const defaultSortedAssetItems = JSON.parse(defaultSortedAssets.body).data.items as Array<{ id: string; sourceMtime: string | null }>;
+if (
+  defaultSortedAssets.statusCode !== 200 ||
+  defaultSortedAssetItems[0]?.id !== "asset-sort-newer" ||
+  defaultSortedAssetItems[1]?.id !== "asset-sort-older"
+) {
+  throw new Error(`default assets sort should be sourceMtime desc: ${defaultSortedAssets.statusCode} ${defaultSortedAssets.body}`);
+}
+
+const scanCompatNow = new Date().toISOString();
+app.db
+  .prepare(
+    `INSERT INTO scan_tasks (id, status, dry_run, gallery_id, created_by, created_at, started_at, error, progress_phase, albums_discovered, assets_discovered)
+     VALUES (?, ?, 1, NULL, 'admin', ?, ?, ?, ?, ?, ?)`
+  )
+  .run("scan-smoke-running-progress", "running", scanCompatNow, scanCompatNow, null, "walking", 3, 4);
+const runningProgress = await app.inject({ method: "GET", url: "/api/v2/scan/scan-smoke-running-progress", headers: { cookie: authHeader } });
+const runningProgressData = JSON.parse(runningProgress.body).data as { status?: string; error?: string | null; progressPhase?: string | null };
+if (runningProgress.statusCode !== 200 || runningProgressData.status !== "running" || runningProgressData.error !== null || runningProgressData.progressPhase !== "walking") {
+  throw new Error(`running scan progress DTO failed: ${runningProgress.statusCode} ${runningProgress.body}`);
+}
+app.db
+  .prepare(
+    `INSERT INTO scan_tasks (id, status, dry_run, gallery_id, created_by, created_at, started_at, error, albums_discovered, assets_discovered)
+     VALUES (?, 'running', 1, NULL, 'admin', ?, ?, 'phase:folders', 5, 6)`
+  )
+  .run("scan-smoke-legacy-phase", new Date(Date.parse(scanCompatNow) + 1000).toISOString(), scanCompatNow);
+const legacyPhase = await app.inject({ method: "GET", url: "/api/v2/scan/scan-smoke-legacy-phase", headers: { cookie: authHeader } });
+const legacyPhaseData = JSON.parse(legacyPhase.body).data as { error?: string | null; progressPhase?: string | null };
+if (legacyPhase.statusCode !== 200 || legacyPhaseData.error !== null || legacyPhaseData.progressPhase !== "folders") {
+  throw new Error(`legacy scan phase DTO failed: ${legacyPhase.statusCode} ${legacyPhase.body}`);
+}
+const activeScanList = await app.inject({ method: "GET", url: "/api/v2/scan", headers: { cookie: authHeader } });
+const activeScanListData = JSON.parse(activeScanList.body).data as { latestActive?: { taskId?: string; status?: string } | null };
+if (activeScanList.statusCode !== 200 || activeScanListData.latestActive?.taskId !== "scan-smoke-legacy-phase") {
+  throw new Error(`active scan recovery DTO failed: ${activeScanList.statusCode} ${activeScanList.body}`);
+}
+app.db
+  .prepare(
+    `INSERT INTO scan_tasks (id, status, dry_run, gallery_id, created_by, created_at, finished_at, error, albums_discovered, assets_discovered)
+     VALUES (?, 'failed', 1, NULL, 'admin', ?, ?, 'expected smoke failure', 0, 0)`
+  )
+  .run("scan-smoke-failed-error", scanCompatNow, scanCompatNow);
+const failedScan = await app.inject({ method: "GET", url: "/api/v2/scan/scan-smoke-failed-error", headers: { cookie: authHeader } });
+const failedScanData = JSON.parse(failedScan.body).data as { status?: string; error?: string | null };
+if (failedScan.statusCode !== 200 || failedScanData.status !== "failed" || failedScanData.error !== "expected smoke failure") {
+  throw new Error(`failed scan error DTO failed: ${failedScan.statusCode} ${failedScan.body}`);
 }
 
 const updateSystemConfig = await app.inject({
@@ -175,7 +354,7 @@ const dangerousGallery = await app.inject({
   method: "POST",
   url: "/api/v2/galleries",
   headers: { cookie: authHeader },
-  payload: { name: "Danger Gallery", path: "/example/media-root" }
+  payload: { name: "Danger Gallery", path: "/mnt/user" }
 });
 if (dangerousGallery.statusCode !== 400) {
   throw new Error(`dangerous gallery should be 400, got ${dangerousGallery.statusCode} ${dangerousGallery.body}`);
@@ -217,16 +396,13 @@ const galleryScanDryRun = await app.inject({
   headers: { cookie: authHeader },
   payload: { dryRun: true }
 });
-const galleryScanDryRunData = JSON.parse(galleryScanDryRun.body).data as { dryRun?: boolean; discovered?: { albums: number; assets: number }; changes?: { albumsToCreate: number; assetsToCreate: number } };
-if (
-  galleryScanDryRun.statusCode !== 200 ||
-  galleryScanDryRunData.dryRun !== true ||
-  galleryScanDryRunData.discovered?.albums !== 2 ||
-  galleryScanDryRunData.discovered?.assets !== 2 ||
-  galleryScanDryRunData.changes?.albumsToCreate !== 2 ||
-  galleryScanDryRunData.changes?.assetsToCreate !== 2
-) {
+const galleryScanDryRunData = JSON.parse(galleryScanDryRun.body).data as { taskId?: string; status?: string; dryRun?: boolean };
+if (galleryScanDryRun.statusCode !== 202 || galleryScanDryRunData.dryRun !== true || !galleryScanDryRunData.taskId) {
   throw new Error(`gallery scan dry-run failed: ${galleryScanDryRun.statusCode} ${galleryScanDryRun.body}`);
+}
+const galleryScanDryRunTask = await waitForScanTask(app, galleryScanDryRunData.taskId, authHeader);
+if (galleryScanDryRunTask.dryRun !== true || galleryScanDryRunTask.albumsDiscovered !== 2 || galleryScanDryRunTask.assetsDiscovered !== 2) {
+  throw new Error(`gallery scan dry-run task failed: ${JSON.stringify(galleryScanDryRunTask)}`);
 }
 
 const galleryScanRun = await app.inject({
@@ -235,16 +411,13 @@ const galleryScanRun = await app.inject({
   headers: { cookie: authHeader },
   payload: { dryRun: false }
 });
-const galleryScanRunData = JSON.parse(galleryScanRun.body).data as { dryRun?: boolean; backupPath?: string; discovered?: { albums: number; assets: number } };
-if (
-  galleryScanRun.statusCode !== 200 ||
-  galleryScanRunData.dryRun !== false ||
-  !galleryScanRunData.backupPath ||
-  !fs.existsSync(galleryScanRunData.backupPath) ||
-  galleryScanRunData.discovered?.albums !== 2 ||
-  galleryScanRunData.discovered?.assets !== 2
-) {
+const galleryScanRunData = JSON.parse(galleryScanRun.body).data as { taskId?: string; status?: string; dryRun?: boolean };
+if (galleryScanRun.statusCode !== 202 || galleryScanRunData.dryRun !== false || !galleryScanRunData.taskId) {
   throw new Error(`gallery scan import failed: ${galleryScanRun.statusCode} ${galleryScanRun.body}`);
+}
+const galleryScanRunTask = await waitForScanTask(app, galleryScanRunData.taskId, authHeader);
+if (galleryScanRunTask.dryRun !== false || galleryScanRunTask.albumsDiscovered !== 2 || galleryScanRunTask.assetsDiscovered !== 2) {
+  throw new Error(`gallery scan import task failed: ${JSON.stringify(galleryScanRunTask)}`);
 }
 const scannedAlbums = await app.inject({
   method: "GET",
@@ -263,6 +436,90 @@ const scannedAssets = await app.inject({
 if (scannedAssets.statusCode !== 200 || JSON.parse(scannedAssets.body).data.items.length < 1) {
   throw new Error(`scanned assets list failed: ${scannedAssets.statusCode} ${scannedAssets.body}`);
 }
+
+const nestedArchiveFile = path.join(smokeGalleryPath, "中文压缩包.cbz");
+const nestedArchiveSmall = await sharp({
+  create: { width: 16, height: 16, channels: 3, background: { r: 20, g: 30, b: 40 } }
+})
+  .jpeg()
+  .toBuffer();
+const nestedArchiveLarge = await sharp({
+  create: { width: 80, height: 50, channels: 3, background: { r: 40, g: 120, b: 190 } }
+})
+  .jpeg()
+  .toBuffer();
+await writeZipFile(nestedArchiveFile, [
+  { entryPath: "封面.jpg", buffer: nestedArchiveSmall },
+  { entryPath: "正片/第01张.jpg", buffer: nestedArchiveLarge },
+  { entryPath: "__MACOSX/._ignored.jpg", buffer: nestedArchiveSmall }
+]);
+const fullScan = await app.inject({
+  method: "POST",
+  url: "/api/v2/scan",
+  headers: { cookie: authHeader },
+  payload: { dryRun: false, fast: false, galleryId: smokeGalleryId }
+});
+const fullScanData = JSON.parse(fullScan.body).data as { taskId?: string; dryRun?: boolean };
+if (fullScan.statusCode !== 202 || fullScanData.dryRun !== false || !fullScanData.taskId) {
+  throw new Error(`full scan fast:false failed: ${fullScan.statusCode} ${fullScan.body}`);
+}
+const fullScanTask = await waitForScanTask(app, fullScanData.taskId, authHeader);
+if (fullScanTask.dryRun !== false || fullScanTask.albumsDiscovered !== 3 || fullScanTask.assetsDiscovered !== 3) {
+  throw new Error(`full scan task failed: ${JSON.stringify(fullScanTask)}`);
+}
+const archiveAlbum = app.db
+  .prepare("SELECT id, asset_count FROM albums WHERE library_root_id = ? AND source_path = ?")
+  .get(smokeGalleryId, nestedArchiveFile) as { id: string; asset_count: number } | undefined;
+if (!archiveAlbum || archiveAlbum.asset_count !== 1) {
+  throw new Error(`full scan should import only the larger nested archive image set: ${JSON.stringify(archiveAlbum)}`);
+}
+const archiveAsset = app.db
+  .prepare("SELECT id, name, zip_entry_path FROM assets WHERE album_id = ?")
+  .get(archiveAlbum.id) as { id: string; name: string; zip_entry_path: string | null } | undefined;
+if (!archiveAsset || archiveAsset.name !== "第01张.jpg" || archiveAsset.zip_entry_path !== "正片/第01张.jpg") {
+  throw new Error(`full scan archive Chinese/nested asset failed: ${JSON.stringify(archiveAsset)}`);
+}
+const scannedArchiveOriginal = await app.inject({
+  method: "GET",
+  url: `/api/v2/assets/${encodeURIComponent(archiveAsset.id)}/original`,
+  headers: { cookie: authHeader }
+});
+if (scannedArchiveOriginal.statusCode !== 200 || scannedArchiveOriginal.headers["content-type"] !== "image/jpeg") {
+  throw new Error(`scanned archive original failed: ${scannedArchiveOriginal.statusCode} ${scannedArchiveOriginal.body}`);
+}
+const scannedArchiveThumbnail = await app.inject({
+  method: "GET",
+  url: `/api/v2/assets/${encodeURIComponent(archiveAsset.id)}/thumbnail`,
+  headers: { cookie: authHeader }
+});
+if (scannedArchiveThumbnail.statusCode !== 200 || scannedArchiveThumbnail.headers["content-type"] !== "image/jpeg") {
+  throw new Error(`scanned archive thumbnail failed: ${scannedArchiveThumbnail.statusCode} ${scannedArchiveThumbnail.body}`);
+}
+const historicalAlbumId = "album-smoke-historical";
+const historicalAssetId = "asset-smoke-historical";
+app.db
+  .prepare(
+    "INSERT INTO albums (id, library_root_id, name, source_type, source_path, source_mtime, assets_fingerprint, cover_asset_id, asset_count, scan_status, created_at, updated_at) VALUES (?, ?, 'Historical Album', 'folder', ?, ?, 'historical-fp', ?, 1, 'ready', ?, ?)"
+  )
+  .run(historicalAlbumId, smokeGalleryId, path.join(smokeGalleryPath, "missing-historical"), new Date().toISOString(), historicalAssetId, new Date().toISOString(), new Date().toISOString());
+app.db
+  .prepare(
+    "INSERT INTO assets (id, album_id, name, extension, source_type, source_path, relative_path, sort_index, width, height, size_bytes, thumbnail_key, created_at, updated_at) VALUES (?, ?, 'historical.jpg', '.jpg', 'folder', ?, 'missing-historical/historical.jpg', 1, 10, 10, 10, 'smoke/historical', ?, ?)"
+  )
+  .run(historicalAssetId, historicalAlbumId, path.join(smokeGalleryPath, "missing-historical", "historical.jpg"), new Date().toISOString(), new Date().toISOString());
+const fullScanAgain = await app.inject({
+  method: "POST",
+  url: "/api/v2/scan",
+  headers: { cookie: authHeader },
+  payload: { dryRun: false, fast: false, galleryId: smokeGalleryId }
+});
+const fullScanAgainData = JSON.parse(fullScanAgain.body).data as { taskId?: string };
+if (fullScanAgain.statusCode !== 202 || !fullScanAgainData.taskId) {
+  throw new Error(`full scan repeat failed: ${fullScanAgain.statusCode} ${fullScanAgain.body}`);
+}
+await waitForScanTask(app, fullScanAgainData.taskId, authHeader);
+const historicalStillPresent = app.db.prepare("SELECT id FROM albums WHERE id = ?").get(historicalAlbumId) as { id: string } | undefined;
+if (!historicalStillPresent) throw new Error("full scan should not delete historical records that were not found");
 
 const createUser = await app.inject({
   method: "POST",
@@ -347,13 +604,13 @@ const scan = await app.inject({
   headers: { cookie: authHeader },
   payload: { dryRun: true }
 });
-if (scan.statusCode !== 200 || JSON.parse(scan.body).data.status !== "completed") {
+if (scan.statusCode !== 202 || !JSON.parse(scan.body).data.taskId) {
   throw new Error(`scan smoke failed: ${scan.statusCode} ${scan.body}`);
 }
 const scanTaskId = JSON.parse(scan.body).data.taskId;
-const scanStatus = await app.inject({ method: "GET", url: `/api/v2/scan/${scanTaskId}`, headers: { cookie: authHeader } });
-if (scanStatus.statusCode !== 200 || JSON.parse(scanStatus.body).data.albumsDiscovered < 1) {
-  throw new Error(`scan status smoke failed: ${scanStatus.statusCode} ${scanStatus.body}`);
+const scanStatus = await waitForScanTask(app, scanTaskId, authHeader);
+if (scanStatus.albumsDiscovered < 1) {
+  throw new Error(`scan status smoke failed: ${JSON.stringify(scanStatus)}`);
 }
 
 const cacheStatus = await app.inject({ method: "GET", url: "/api/v2/cache/thumbnails/status", headers: { cookie: authHeader } });
@@ -731,8 +988,8 @@ if (invalidArchiveOriginal.statusCode !== 415) {
   throw new Error(`invalid archive should be 415, got ${invalidArchiveOriginal.statusCode} ${invalidArchiveOriginal.body}`);
 }
 
-const unsupportedRarFile = path.join(tempDir, "unsupported.rar");
-fs.writeFileSync(unsupportedRarFile, "rar placeholder");
+const invalidRarFile = path.join(tempDir, "invalid.rar");
+fs.writeFileSync(invalidRarFile, "rar placeholder");
 app.db
   .prepare(
     "INSERT INTO assets (id, album_id, name, extension, source_type, source_path, relative_path, zip_entry_path, sort_index, width, height, size_bytes, thumbnail_key, created_at, updated_at) VALUES (?, 'album-demo', ?, ?, 'archive', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -741,7 +998,7 @@ app.db
     "asset-smoke-rar",
     "rar-image.jpg",
     "jpg",
-    unsupportedRarFile,
+    invalidRarFile,
     "rar-image.jpg",
     "rar-image.jpg",
     8,
@@ -752,16 +1009,16 @@ app.db
     now,
     now
   );
-const unsupportedRarOriginal = await app.inject({
+const invalidRarOriginal = await app.inject({
   method: "GET",
   url: "/api/v2/assets/asset-smoke-rar/original",
   headers: { cookie: authHeader }
 });
-if (unsupportedRarOriginal.statusCode !== 501) {
-  throw new Error(`unsupported rar should be 501, got ${unsupportedRarOriginal.statusCode} ${unsupportedRarOriginal.body}`);
+if (invalidRarOriginal.statusCode !== 415) {
+  throw new Error(`invalid rar should be 415, got ${invalidRarOriginal.statusCode} ${invalidRarOriginal.body}`);
 }
-if (!unsupportedRarOriginal.body.includes("rar/cbr/7z/cb7") || !unsupportedRarOriginal.headers["x-momentpic-archive-readiness"]) {
-  throw new Error(`unsupported rar should include readiness detail: ${unsupportedRarOriginal.statusCode} ${unsupportedRarOriginal.body}`);
+if (!invalidRarOriginal.body.includes("readable archive")) {
+  throw new Error(`invalid rar should report unreadable archive: ${invalidRarOriginal.statusCode} ${invalidRarOriginal.body}`);
 }
 
 const legacyDbPath = path.join(tempDir, "legacy.sqlite");
