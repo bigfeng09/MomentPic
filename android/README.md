@@ -44,7 +44,7 @@ Settings now keeps connection and appearance options on the main page, with two 
 Admin users can add an album library directory by entering a server-side absolute path such as `/app/media/photos`.
 This path is submitted to BackendV2 as a library root; it is not an Android local folder picker.
 Admins can enable or disable registered sources and run a `dryRun=true` scan preview from Android.
-The album list refresh button runs a real incremental refresh with `dryRun=false, fast=true`; it is intended to discover newly added album folders and archive albums.
+The album list now exposes the same two refresh modes as the Web UI: incremental refresh sends `dryRun=false, fast=true`, and full-library refresh sends `dryRun=false, fast=false`. When a gallery source is selected, both modes include that source as `galleryId`.
 Data management also exposes per-source incremental import and full-library import. Full-library import uses `fast=false` and traverses the whole selected source, including archive deep parsing.
 
 Album loading is optimized for large libraries:

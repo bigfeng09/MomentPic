@@ -1077,11 +1077,19 @@ public class MainActivity extends Activity {
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
         actionRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView scan = headerPill(scanningLibrary ? "扫描中..." : "增量刷新 ↻", false);
-        scan.setEnabled(!scanningLibrary);
-        scan.setAlpha(scanningLibrary ? 0.6f : 1f);
-        scan.setOnClickListener(v -> refreshLibrary());
-        actionRow.addView(scan, new LinearLayout.LayoutParams(0, dp(36), 1));
+        TextView incrementalScan = headerPill(scanningLibrary ? "扫描中..." : "增量刷新 ↻", false);
+        incrementalScan.setEnabled(!scanningLibrary);
+        incrementalScan.setAlpha(scanningLibrary ? 0.6f : 1f);
+        incrementalScan.setOnClickListener(v -> refreshLibrary(false));
+        actionRow.addView(incrementalScan, new LinearLayout.LayoutParams(0, dp(36), 1));
+
+        TextView fullScan = headerPill(scanningLibrary ? "扫描中..." : "全量刷新 ↻", false);
+        fullScan.setEnabled(!scanningLibrary);
+        fullScan.setAlpha(scanningLibrary ? 0.6f : 1f);
+        fullScan.setOnClickListener(v -> refreshLibrary(true));
+        LinearLayout.LayoutParams fullScanParams = new LinearLayout.LayoutParams(0, dp(36), 1);
+        fullScanParams.setMargins(dp(8), 0, 0, 0);
+        actionRow.addView(fullScan, fullScanParams);
 
         LinearLayout.LayoutParams actionParams = matchWrap();
         actionParams.setMargins(0, dp(10), 0, 0);
@@ -1884,12 +1892,12 @@ public class MainActivity extends Activity {
         }).execute();
     }
 
-    private void refreshLibrary() {
+    private void refreshLibrary(boolean full) {
         if (scanningLibrary) return;
         scanningLibrary = true;
         showAlbums(false);
-        toast("开始增量刷新图库");
-        new ScanLibraryTask(result -> {
+        toast(full ? "开始全量刷新图库" : "开始增量刷新图库");
+        new ScanLibraryTask(full, result -> {
             scanningLibrary = false;
             if (result != null && result.ok) {
                 clearAlbumPageCache();
@@ -1897,7 +1905,7 @@ public class MainActivity extends Activity {
                 newAlbumIds.addAll(result.newAlbumIds);
                 saveNewAlbumIds();
                 activeSort = SORT_NEW;
-                toast(scanCompleteText(result));
+                toast(scanCompleteText(result, full));
                 showAlbums(true);
             } else {
                 showAlbums(false);
@@ -1905,9 +1913,10 @@ public class MainActivity extends Activity {
         }).execute();
     }
 
-    private String scanCompleteText(ScanResult result) {
-        if (result == null) return "增量刷新完成";
-        String text = "增量刷新完成，新增 " + result.newAlbumIds.size() + " 个相册";
+    private String scanCompleteText(ScanResult result, boolean full) {
+        String mode = full ? "全量刷新" : "增量刷新";
+        if (result == null) return mode + "完成";
+        String text = mode + "完成，新增/变化 " + result.newAlbumIds.size() + " 个相册";
         if (result.status != null) {
             text += " · 图片 " + result.status.assetsDiscovered;
             if (result.status.unchangedAlbums > 0 || result.status.unchangedAssets > 0) {
@@ -3560,10 +3569,12 @@ public class MainActivity extends Activity {
     }
 
     private class ScanLibraryTask extends AsyncTask<Void, Void, ScanResult> {
+        private final boolean full;
         private final ScanCallback callback;
         private String error;
 
-        ScanLibraryTask(ScanCallback callback) {
+        ScanLibraryTask(boolean full, ScanCallback callback) {
+            this.full = full;
             this.callback = callback;
         }
 
@@ -3571,7 +3582,7 @@ public class MainActivity extends Activity {
         protected ScanResult doInBackground(Void... voids) {
             try {
                 List<Album> beforeAlbums = api.getAllAlbums();
-                String taskId = api.startScan(false, false, activeGalleryPrefix);
+                String taskId = api.startScan(false, full, activeGalleryPrefix);
                 ScanStatus finalStatus = null;
                 if (taskId != null && !taskId.trim().isEmpty()) {
                     for (int i = 0; i < 150; i++) {
