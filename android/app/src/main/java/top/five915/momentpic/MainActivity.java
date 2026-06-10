@@ -25,6 +25,7 @@ import android.net.Uri;
 import android.util.LruCache;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
@@ -40,6 +41,7 @@ import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Switch;
@@ -110,6 +112,8 @@ public class MainActivity extends Activity {
     private static final int COLOR_FAVORITE_DARK = 0xFFFF7E98;
     private static final String SORT_NORMAL = "";
     private static final String SORT_NEW = "新增";
+    private static final String ALBUM_SORT_UPDATED = "updatedAt";
+    private static final String ALBUM_SORT_NAME = "name";
     private static final String ICON_SEARCH = "search";
     private static final String ICON_MENU = "menu";
     private static final String ICON_GRID = "grid";
@@ -140,6 +144,7 @@ public class MainActivity extends Activity {
     private String activeTag = TAG_ALL;
     private String searchKeyword = "";
     private String activeSort = SORT_NORMAL;
+    private String activeAlbumSort = ALBUM_SORT_UPDATED;
     private List<Album> albums = new ArrayList<>();
     private List<Asset> assets = new ArrayList<>();
     private List<Asset> favoriteAssets = new ArrayList<>();
@@ -1006,8 +1011,8 @@ public class MainActivity extends Activity {
         searchTop.setOnClickListener(v -> toast("在搜索栏输入关键词"));
         titleRow.addView(searchTop, new LinearLayout.LayoutParams(dp(36), dp(40)));
 
-        View menu = iconButtonView(ICON_MENU, colorText(), "设置");
-        menu.setOnClickListener(v -> showSettings());
+        View menu = iconButtonView(ICON_MENU, colorText(), "更多");
+        menu.setOnClickListener(this::showHomeMenu);
         LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(dp(30), dp(40));
         menuParams.setMargins(dp(4), 0, 0, 0);
         titleRow.addView(menu, menuParams);
@@ -1073,57 +1078,32 @@ public class MainActivity extends Activity {
             wrap.addView(historyScroller, historyParams);
         }
 
-        LinearLayout actionRow = new LinearLayout(this);
-        actionRow.setOrientation(LinearLayout.HORIZONTAL);
-        actionRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout selectorRow = new LinearLayout(this);
+        selectorRow.setOrientation(LinearLayout.HORIZONTAL);
+        selectorRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView incrementalScan = headerPill(scanningLibrary ? "扫描中..." : "增量刷新 ↻", false);
-        incrementalScan.setEnabled(!scanningLibrary);
-        incrementalScan.setAlpha(scanningLibrary ? 0.6f : 1f);
-        incrementalScan.setOnClickListener(v -> refreshLibrary(false));
-        actionRow.addView(incrementalScan, new LinearLayout.LayoutParams(0, dp(36), 1));
+        TextView tagSelector = headerPill("分类：" + activeTag + "⌄", !TAG_ALL.equals(activeTag));
+        tagSelector.setTextSize(12);
+        tagSelector.setOnClickListener(v -> showTagSelector());
+        selectorRow.addView(tagSelector, new LinearLayout.LayoutParams(0, dp(34), 1));
 
-        TextView fullScan = headerPill(scanningLibrary ? "扫描中..." : "全量刷新 ↻", false);
-        fullScan.setEnabled(!scanningLibrary);
-        fullScan.setAlpha(scanningLibrary ? 0.6f : 1f);
-        fullScan.setOnClickListener(v -> refreshLibrary(true));
-        LinearLayout.LayoutParams fullScanParams = new LinearLayout.LayoutParams(0, dp(36), 1);
-        fullScanParams.setMargins(dp(8), 0, 0, 0);
-        actionRow.addView(fullScan, fullScanParams);
+        TextView sortSelector = headerPill("排序：" + albumSortLabel() + "⌄", ALBUM_SORT_NAME.equals(activeAlbumSort));
+        sortSelector.setTextSize(12);
+        sortSelector.setOnClickListener(v -> showAlbumSortSelector());
+        LinearLayout.LayoutParams sortParams = new LinearLayout.LayoutParams(0, dp(34), 1);
+        sortParams.setMargins(dp(8), 0, 0, 0);
+        selectorRow.addView(sortSelector, sortParams);
 
-        LinearLayout.LayoutParams actionParams = matchWrap();
-        actionParams.setMargins(0, dp(10), 0, 0);
-        wrap.addView(actionRow, actionParams);
-
-        HorizontalScrollView scroller = new HorizontalScrollView(this);
-        scroller.setHorizontalScrollBarEnabled(false);
-        LinearLayout chips = new LinearLayout(this);
-        chips.setOrientation(LinearLayout.HORIZONTAL);
-        chips.setPadding(0, 0, 0, 0);
-        for (String tag : TAGS) {
-            TextView chip = headerPill(tag, tag.equals(activeTag));
-            chip.setOnClickListener(v -> {
-                activeTag = tag;
-                showAlbums(true);
-            });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(32));
-            params.setMargins(0, 0, dp(8), 0);
-            chips.addView(chip, params);
-        }
-        scroller.addView(chips);
-        LinearLayout.LayoutParams chipParams = matchWrap();
-        chipParams.setMargins(0, dp(10), 0, 0);
-        wrap.addView(scroller, chipParams);
+        LinearLayout.LayoutParams selectorParams = matchWrap();
+        selectorParams.setMargins(0, dp(10), 0, 0);
+        wrap.addView(selectorRow, selectorParams);
 
         LinearLayout summaryRow = new LinearLayout(this);
         summaryRow.setGravity(Gravity.CENTER_VERTICAL);
         summaryRow.setPadding(0, 0, 0, 0);
-        String summaryText = isNewSort() ? "新增/更新 " + albums.size() + " 个相册" : "共 " + albums.size() + " 个相册";
+        String summaryText = scanningLibrary ? "扫描中..." : (isNewSort() ? "新增/更新 " + albums.size() + " 个相册" : "共 " + albums.size() + " 个相册");
         TextView summary = text(summaryText, 12, colorMuted(), false);
         summaryRow.addView(summary, new LinearLayout.LayoutParams(0, dp(26), 1));
-        TextView order = text("按更新时间⌄", 12, colorMuted(), false);
-        order.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        summaryRow.addView(order, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(26)));
         LinearLayout.LayoutParams summaryParams = matchWrap();
         summaryParams.setMargins(0, dp(8), 0, 0);
         wrap.addView(summaryRow, summaryParams);
@@ -1811,11 +1791,12 @@ public class MainActivity extends Activity {
                 showAlbums(false);
                 return;
             }
-            new NewAlbumsTask(keyword, activeGalleryPrefix, result -> {
+            new NewAlbumsTask(keyword, activeGalleryPrefix, albumSortBy(), albumSortOrder(), result -> {
                 loading = false;
                 albumsLoadedOnce = true;
                 if (result != null) {
                     albums.addAll(result.items);
+                    sortAlbums();
                     albumsHasMore = false;
                 } else {
                     albumsHasMore = false;
@@ -1927,17 +1908,82 @@ public class MainActivity extends Activity {
         return text;
     }
 
+    private void showHomeMenu(View anchor) {
+        PopupMenu popup = new PopupMenu(this, anchor);
+        MenuItem incremental = popup.getMenu().add(0, 1, 0, scanningLibrary ? "扫描中..." : "增量刷新");
+        incremental.setEnabled(!scanningLibrary);
+        MenuItem full = popup.getMenu().add(0, 2, 1, scanningLibrary ? "扫描中..." : "全量刷新");
+        full.setEnabled(!scanningLibrary);
+        popup.getMenu().add(0, 3, 2, "我的/设置");
+        popup.setOnMenuItemClickListener(item -> {
+            int id = item.getItemId();
+            if (id == 1) {
+                refreshLibrary(false);
+                return true;
+            }
+            if (id == 2) {
+                refreshLibrary(true);
+                return true;
+            }
+            showSettings();
+            return true;
+        });
+        popup.show();
+    }
+
+    private void showTagSelector() {
+        int checked = 0;
+        for (int i = 0; i < TAGS.length; i++) {
+            if (TAGS[i].equals(activeTag)) {
+                checked = i;
+                break;
+            }
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("选择标签分类")
+                .setSingleChoiceItems(TAGS, checked, (dialog, which) -> {
+                    String next = TAGS[which];
+                    if (!next.equals(activeTag)) {
+                        activeTag = next;
+                        showAlbums(true);
+                    }
+                    dialog.dismiss();
+                })
+                .show();
+    }
+
+    private void showAlbumSortSelector() {
+        String[] labels = {"更新时间", "相册名"};
+        String[] values = {ALBUM_SORT_UPDATED, ALBUM_SORT_NAME};
+        int checked = ALBUM_SORT_NAME.equals(activeAlbumSort) ? 1 : 0;
+        new AlertDialog.Builder(this)
+                .setTitle("选择排序")
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    String next = values[which];
+                    if (!next.equals(activeAlbumSort)) {
+                        activeAlbumSort = next;
+                        showAlbums(true);
+                    }
+                    dialog.dismiss();
+                })
+                .show();
+    }
+
     private String joinKeywords(String search, String tag) {
         if (search == null || search.trim().isEmpty()) return tag;
         return search.trim() + " " + tag;
     }
 
     private String albumSortBy() {
-        return "updatedAt";
+        return ALBUM_SORT_NAME.equals(activeAlbumSort) ? ALBUM_SORT_NAME : ALBUM_SORT_UPDATED;
     }
 
     private String albumSortOrder() {
-        return "desc";
+        return ALBUM_SORT_NAME.equals(activeAlbumSort) ? "asc" : "desc";
+    }
+
+    private String albumSortLabel() {
+        return ALBUM_SORT_NAME.equals(activeAlbumSort) ? "相册名" : "更新时间";
     }
 
     private void runSearch(String keyword) {
@@ -1948,7 +1994,22 @@ public class MainActivity extends Activity {
 
     private void sortAlbums() {
         if (albums.size() < 2) return;
-        Collections.sort(albums, (left, right) -> compareDesc(left.sortTime, right.sortTime));
+        Collections.sort(albums, (left, right) -> {
+            if (FAVORITES_ALBUM_ID.equals(albumKey(left))) return -1;
+            if (FAVORITES_ALBUM_ID.equals(albumKey(right))) return 1;
+            if (ALBUM_SORT_NAME.equals(activeAlbumSort)) {
+                int byName = safeText(left.name).compareToIgnoreCase(safeText(right.name));
+                if (byName != 0) return byName;
+                return albumKey(left).compareTo(albumKey(right));
+            }
+            int byTime = compareDesc(left.sortTime, right.sortTime);
+            if (byTime != 0) return byTime;
+            return safeText(left.name).compareToIgnoreCase(safeText(right.name));
+        });
+    }
+
+    private String safeText(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private int compareDesc(String left, String right) {
@@ -2704,6 +2765,7 @@ public class MainActivity extends Activity {
         View albums = navItem(ICON_GRID, "相册", !isFavoritesTag());
         albums.setOnClickListener(v -> {
             activeTag = TAG_ALL;
+            activeSort = SORT_NORMAL;
             showAlbums(true);
         });
         nav.addView(albums, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
@@ -2711,6 +2773,7 @@ public class MainActivity extends Activity {
         View favorites = navItem(ICON_HEART, "收藏", isFavoritesTag());
         favorites.setOnClickListener(v -> {
             activeTag = TAG_FAVORITES;
+            activeSort = SORT_NORMAL;
             showAlbums(true);
         });
         nav.addView(favorites, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
@@ -3513,19 +3576,23 @@ public class MainActivity extends Activity {
     private class NewAlbumsTask extends AsyncTask<Void, Void, PageResult<Album>> {
         private final String keyword;
         private final String sourcePrefix;
+        private final String sortBy;
+        private final String sortOrder;
         private final PageCallback<Album> callback;
         private String error;
 
-        NewAlbumsTask(String keyword, String sourcePrefix, PageCallback<Album> callback) {
+        NewAlbumsTask(String keyword, String sourcePrefix, String sortBy, String sortOrder, PageCallback<Album> callback) {
             this.keyword = keyword;
             this.sourcePrefix = sourcePrefix;
+            this.sortBy = sortBy;
+            this.sortOrder = sortOrder;
             this.callback = callback;
         }
 
         @Override
         protected PageResult<Album> doInBackground(Void... voids) {
             try {
-                return api.getNewAlbums(newAlbumIds, keyword, sourcePrefix);
+                return api.getNewAlbums(newAlbumIds, keyword, sourcePrefix, sortBy, sortOrder);
             } catch (Exception e) {
                 error = e.getMessage();
                 return null;
@@ -3833,13 +3900,13 @@ public class MainActivity extends Activity {
             return GallerySource.from(item);
         }
 
-        PageResult<Album> getNewAlbums(List<String> newIds, String keyword, String sourcePrefix) throws Exception {
+        PageResult<Album> getNewAlbums(List<String> newIds, String keyword, String sourcePrefix, String sortBy, String sortOrder) throws Exception {
             Set<String> idSet = new HashSet<>(newIds);
             List<Album> filtered = new ArrayList<>();
             int page = 1;
             int total = 0;
             do {
-                PageResult<Album> result = getAlbums(page, 200, keyword, "updatedAt", "desc");
+                PageResult<Album> result = getAlbums(page, 200, keyword, sortBy, sortOrder);
                 total = result.total;
                 for (Album album : result.items) {
                     if (idSet.contains(album.key()) && galleryMatches(album, sourcePrefix)) {
