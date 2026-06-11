@@ -1,8 +1,11 @@
 services:
   moment-pic-v2:
-    build:
-      context: .
-    image: moment-pic-v2:${MOMENTPIC_IMAGE_TAG:-20260608-local}
+    # For public installs, use the full GHCR image name. The short name
+    # moment-pic-v2:latest is only a local Docker tag and cannot be pulled.
+    image: ghcr.io/bigfeng09/moment-pic-v2:${MOMENTPIC_IMAGE_TAG:-latest}
+    # Uncomment these lines only when building locally from this directory.
+    # build:
+    #   context: .
     container_name: moment-pic-v2
     restart: unless-stopped
     network_mode: bridge

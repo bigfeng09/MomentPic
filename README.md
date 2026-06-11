@@ -44,9 +44,12 @@ docs/         发布脱敏与补充说明
 当前发布镜像：
 
 ```text
+ghcr.io/bigfeng09/moment-pic-v2:latest
 ghcr.io/bigfeng09/momentpic-backend-v2:latest
 ghcr.io/bigfeng09/momentpic-backend-v2:20260608-223938
 ```
+
+注意：`moment-pic-v2:latest` 这种没有 registry 前缀的写法只表示你本机 Docker 里的本地镜像标签，Docker 会默认去 Docker Hub 拉取 `library/moment-pic-v2:latest`，外部用户会拉不到。论坛安装请使用完整的 GHCR 镜像名，例如 `ghcr.io/bigfeng09/moment-pic-v2:latest`。
 
 示例目录：
 
@@ -74,9 +77,9 @@ EOF
 
 ```yaml
 services:
-  momentpic-backend-v2:
-    image: ghcr.io/bigfeng09/momentpic-backend-v2:20260608-223938
-    container_name: momentpic-backend-v2
+  moment-pic-v2:
+    image: ghcr.io/bigfeng09/moment-pic-v2:latest
+    container_name: moment-pic-v2
     restart: unless-stopped
     ports:
       - "3211:3211"
@@ -105,9 +108,21 @@ curl http://你的服务器IP:3211/api/v2/health
 http://你的服务器IP:3211
 ```
 
-### GHCR private 说明
+### GHCR 拉取失败说明
 
-GitHub Container Registry 的包如果仍是 private，未登录或未授权的机器会拉取失败。需要公开发布时，请在 GitHub 仓库或 package 设置中把对应 GHCR package visibility 调整为 public；如果保持 private，请先登录：
+如果 `docker compose up -d` 提示拉不到镜像，先检查 `image:` 是否写成了完整 GHCR 地址：
+
+```yaml
+image: ghcr.io/bigfeng09/moment-pic-v2:latest
+```
+
+不要写成：
+
+```yaml
+image: moment-pic-v2:latest
+```
+
+GitHub Container Registry 的包如果仍是 private，未登录或未授权的机器也会拉取失败。公开安装时需要把对应 GHCR package visibility 调整为 public；如果保持 private，请先登录：
 
 ```bash
 echo <你的GitHubToken> | docker login ghcr.io -u <你的GitHub用户名> --password-stdin

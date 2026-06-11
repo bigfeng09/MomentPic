@@ -14,6 +14,7 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/bigfeng09/momentpic-backend-v2
+  IMAGE_ALIAS: ghcr.io/bigfeng09/moment-pic-v2
 
 jobs:
   publish:
@@ -38,6 +39,8 @@ jobs:
             echo "tags<<EOF"
             echo "${IMAGE_NAME}:latest"
             echo "${IMAGE_NAME}:${image_tag}"
+            echo "${IMAGE_ALIAS}:latest"
+            echo "${IMAGE_ALIAS}:${image_tag}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -66,6 +69,7 @@ jobs:
           {
             echo "### GHCR publish"
             echo "- Image: ${IMAGE_NAME}"
+            echo "- Alias: ${IMAGE_ALIAS}"
             echo "- Tags: latest, ${{ steps.tags.outputs.image_tag }}"
             echo "- Digest: ${{ steps.build.outputs.digest }}"
           } >> "$GITHUB_STEP_SUMMARY"
