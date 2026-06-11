@@ -122,7 +122,14 @@ image: ghcr.io/bigfeng09/moment-pic-v2:latest
 image: moment-pic-v2:latest
 ```
 
-GitHub Container Registry 的包如果仍是 private，未登录或未授权的机器也会拉取失败。公开安装时需要把对应 GHCR package visibility 调整为 public；如果保持 private，请先登录：
+GitHub Container Registry 的包如果仍是 private，未登录或未授权的机器也会拉取失败。公开安装时需要到 GitHub 页面把对应 GHCR package visibility 调整为 public：
+
+1. 打开仓库右侧或账号 Packages 中的 container package。
+2. 进入 package 的 `Package settings`。
+3. 找到 `Danger Zone` / `Change visibility`。
+4. 把 `ghcr.io/bigfeng09/moment-pic-v2` 和兼容名 `ghcr.io/bigfeng09/momentpic-backend-v2` 都改成 public。
+
+如果保持 private，请先登录：
 
 ```bash
 echo <你的GitHubToken> | docker login ghcr.io -u <你的GitHub用户名> --password-stdin
