@@ -87,6 +87,10 @@ public class MainActivity extends Activity {
     private static final String KEY_DARK_MODE = "dark_mode";
     private static final String KEY_REMEMBER_PASSWORD = "remember_password";
     private static final String KEY_PASSWORD = "password";
+    private static final String KEY_ACTIVE_SCAN_TASK_ID = "active_scan_task_id";
+    private static final String KEY_ACTIVE_SCAN_FULL = "active_scan_full";
+    private static final String KEY_ACTIVE_SCAN_GALLERY = "active_scan_gallery";
+    private static final String KEY_ACTIVE_SCAN_SNAPSHOT = "active_scan_snapshot";
     private static final String DEFAULT_BASE_URL = "http://10.0.2.2:3211";
     private static final String TAG_ALL = "全部";
     private static final String TAG_FAVORITES = "收藏";
@@ -171,6 +175,8 @@ public class MainActivity extends Activity {
     private boolean scanningLibrary = false;
     private boolean loadingGallerySources = false;
     private boolean gallerySourcesLoaded = false;
+    private boolean checkingScanStatus = false;
+    private boolean scanStatusPollScheduled = false;
     private boolean darkMode = false;
     private String activeGalleryPrefix = "";
     private String currentScreen = SCREEN_LOGIN;
@@ -193,6 +199,12 @@ public class MainActivity extends Activity {
         loadSearchHistory();
         loadNewAlbumIds();
         showLogin();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        checkActiveScanTask(false);
     }
 
     private void configureWindow() {
@@ -278,6 +290,7 @@ public class MainActivity extends Activity {
     }
 
     private void refreshCurrentScreen() {
+        checkActiveScanTask(false);
         if (SCREEN_VIEWER.equals(currentScreen)) {
             showViewer(currentAssetIndex);
         } else if (SCREEN_ASSETS.equals(currentScreen) && currentAlbum != null) {
@@ -939,6 +952,7 @@ public class MainActivity extends Activity {
             albumsHasMore = false;
             albumsLoadedOnce = true;
         }
+        scanningLibrary = hasActiveScanTask();
 
         root.removeAllViews();
         LinearLayout page = basePage();
@@ -988,6 +1002,7 @@ public class MainActivity extends Activity {
         root.addView(page, fullScreen());
         scroll.post(() -> scroll.scrollTo(0, albumScrollY));
         loadGallerySourcesIfNeeded();
+        checkActiveScanTask(false);
 
         if (!isFavoritesTag() && !albumsLoadedOnce && albums.isEmpty() && !loading) {
             loadAlbums(true);
@@ -1379,6 +1394,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i < assets.size(); i++) {
             grid.addView(assetTile(assets.get(i), i), assetGridParams());
         }
+        preloadAssetThumbnails(0, 24);
 
         if (loading) {
             ProgressBar bar = new ProgressBar(this);
@@ -1410,6 +1426,7 @@ public class MainActivity extends Activity {
         image.setScaleType(ImageView.ScaleType.CENTER_CROP);
         image.setBackgroundColor(colorSurfaceTint());
         imageLoader.loadThumbnail(image, api.absolute(asset.thumbnailUrl), api.cookieHeader);
+        if (index < 12) preloadAssetThumbnail(index + 12);
         image.setOnClickListener(v -> {
             saveAssetScroll();
             showViewer(index);
@@ -1538,10 +1555,11 @@ public class MainActivity extends Activity {
             favorite.setText(isFavorite(asset) ? "♥" : "♡");
             favorite.setTextColor(isFavorite(asset) ? 0xFFFFCCD6 : Color.WHITE);
             resetZoom.run();
-            imageLoader.load(image, api.absolute(asset.originalUrl), api.cookieHeader);
+            imageLoader.loadPreviewThenOriginal(image, api.absolute(asset.thumbnailUrl), api.absolute(asset.originalUrl), api.cookieHeader);
             preloadViewerImage(currentAssetIndex - 1);
             preloadViewerImage(currentAssetIndex + 1);
             preloadViewerImage(currentAssetIndex + 2);
+            preloadAssetThumbnails(currentAssetIndex + 3, 12);
         };
 
         Runnable previousAction = () -> {
@@ -1766,6 +1784,18 @@ public class MainActivity extends Activity {
         imageLoader.preload(api.absolute(url), api.cookieHeader);
     }
 
+    private void preloadAssetThumbnails(int startIndex, int count) {
+        for (int i = Math.max(0, startIndex); i < Math.min(assets.size(), startIndex + count); i++) {
+            preloadAssetThumbnail(i);
+        }
+    }
+
+    private void preloadAssetThumbnail(int index) {
+        if (index < 0 || index >= assets.size()) return;
+        Asset asset = assets.get(index);
+        imageLoader.preloadThumbnail(api.absolute(asset.thumbnailUrl), api.cookieHeader, dp(220));
+    }
+
     private void loadAlbums(boolean reset) {
         if (isFavoritesTag()) {
             showAlbums(reset);
@@ -1877,21 +1907,8 @@ public class MainActivity extends Activity {
         if (scanningLibrary) return;
         scanningLibrary = true;
         showAlbums(false);
-        toast(full ? "开始全量刷新图库" : "开始增量刷新图库");
-        new ScanLibraryTask(full, result -> {
-            scanningLibrary = false;
-            if (result != null && result.ok) {
-                clearAlbumPageCache();
-                newAlbumIds.clear();
-                newAlbumIds.addAll(result.newAlbumIds);
-                saveNewAlbumIds();
-                activeSort = SORT_NEW;
-                toast(scanCompleteText(result, full));
-                showAlbums(true);
-            } else {
-                showAlbums(false);
-            }
-        }).execute();
+        toast(full ? "已提交全量刷新，后台继续执行" : "已提交增量刷新，后台继续执行");
+        new StartScanTask(full, activeGalleryPrefix).execute();
     }
 
     private String scanCompleteText(ScanResult result, boolean full) {
@@ -1906,6 +1923,109 @@ public class MainActivity extends Activity {
             if (result.status.skippedFiles > 0) text += " · 错误/不支持 " + result.status.skippedFiles;
         }
         return text;
+    }
+
+    private void saveActiveScanTask(String taskId, boolean full, String galleryId, String snapshotJson) {
+        if (taskId == null || taskId.trim().isEmpty()) return;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString(KEY_ACTIVE_SCAN_TASK_ID, taskId.trim())
+                .putBoolean(KEY_ACTIVE_SCAN_FULL, full)
+                .putString(KEY_ACTIVE_SCAN_GALLERY, galleryId == null ? "" : galleryId.trim())
+                .putString(KEY_ACTIVE_SCAN_SNAPSHOT, snapshotJson == null ? "{}" : snapshotJson)
+                .apply();
+    }
+
+    private void clearActiveScanTask() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .remove(KEY_ACTIVE_SCAN_TASK_ID)
+                .remove(KEY_ACTIVE_SCAN_FULL)
+                .remove(KEY_ACTIVE_SCAN_GALLERY)
+                .remove(KEY_ACTIVE_SCAN_SNAPSHOT)
+                .apply();
+    }
+
+    private boolean hasActiveScanTask() {
+        String taskId = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ACTIVE_SCAN_TASK_ID, "");
+        return taskId != null && !taskId.trim().isEmpty();
+    }
+
+    private void checkActiveScanTask(boolean forceMessage) {
+        if (api == null || checkingScanStatus) return;
+        String taskId = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ACTIVE_SCAN_TASK_ID, "");
+        if (taskId == null || taskId.trim().isEmpty()) {
+            scanningLibrary = false;
+            return;
+        }
+        checkingScanStatus = true;
+        scanningLibrary = true;
+        new CheckScanTask(taskId, forceMessage).execute();
+    }
+
+    private void scheduleScanStatusPoll() {
+        if (scanStatusPollScheduled || !hasActiveScanTask()) return;
+        scanStatusPollScheduled = true;
+        root.postDelayed(() -> {
+            scanStatusPollScheduled = false;
+            if (hasActiveScanTask()) {
+                checkActiveScanTask(false);
+                scheduleScanStatusPoll();
+            }
+        }, 5000);
+    }
+
+    private void handleScanCompleted(ScanStatus status) {
+        boolean full = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_ACTIVE_SCAN_FULL, false);
+        String galleryId = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ACTIVE_SCAN_GALLERY, "");
+        String snapshot = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ACTIVE_SCAN_SNAPSHOT, "{}");
+        clearActiveScanTask();
+        scanningLibrary = false;
+        clearAlbumPageCache();
+        new CompleteScanTask(full, galleryId, snapshot, status).execute();
+    }
+
+    private void handleScanFailed(ScanStatus status) {
+        clearActiveScanTask();
+        scanningLibrary = false;
+        showError("刷新图库失败", status == null || status.error == null || status.error.isEmpty() ? "后台扫描失败" : status.error);
+        if (SCREEN_ALBUMS.equals(currentScreen)) showAlbums(false);
+        if (SCREEN_DATA_MANAGER.equals(currentScreen)) showDataManager();
+    }
+
+    private String albumSnapshotJson(List<Album> sourceAlbums) {
+        JSONObject object = new JSONObject();
+        try {
+            for (Album album : sourceAlbums) {
+                String key = albumKey(album);
+                if (key.isEmpty()) continue;
+                JSONObject item = new JSONObject();
+                item.put("assetCount", album.assetCount);
+                item.put("archiveCount", album.archiveCount);
+                item.put("sortTime", album.sortTime == null ? "" : album.sortTime);
+                object.put(key, item);
+            }
+        } catch (Exception ignored) {
+        }
+        return object.toString();
+    }
+
+    private List<String> changedAlbumIdsFromSnapshot(String snapshotJson, List<Album> afterAlbums) {
+        List<String> changed = new ArrayList<>();
+        try {
+            JSONObject before = new JSONObject(snapshotJson == null || snapshotJson.trim().isEmpty() ? "{}" : snapshotJson);
+            for (Album album : afterAlbums) {
+                String key = albumKey(album);
+                if (key.isEmpty()) continue;
+                JSONObject item = before.optJSONObject(key);
+                if (item == null
+                        || item.optInt("assetCount", -1) != album.assetCount
+                        || item.optInt("archiveCount", -1) != album.archiveCount
+                        || !item.optString("sortTime", "").equals(album.sortTime == null ? "" : album.sortTime)) {
+                    changed.add(key);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return changed;
     }
 
     private void showHomeMenu(View anchor) {
@@ -3464,6 +3584,7 @@ public class MainActivity extends Activity {
         private final GallerySource source;
         private final boolean dryRun;
         private final boolean full;
+        private String snapshot = "{}";
         private String error;
 
         GalleryScanTask(GallerySource source, boolean dryRun, boolean full) {
@@ -3480,7 +3601,12 @@ public class MainActivity extends Activity {
         @Override
         protected GalleryScanSummary doInBackground(Void... voids) {
             try {
+                if (!dryRun) snapshot = albumSnapshotJson(api.getAllAlbums(source.prefixKey));
                 String taskId = api.startGalleryScan(source.prefixKey, dryRun, full);
+                if (!dryRun) {
+                    saveActiveScanTask(taskId, full, source.prefixKey, snapshot);
+                    return null;
+                }
                 return api.waitForScanSummary(taskId);
             } catch (Exception e) {
                 error = e.getMessage();
@@ -3491,6 +3617,13 @@ public class MainActivity extends Activity {
         @Override
         protected void onPostExecute(GalleryScanSummary result) {
             if (result == null) {
+                if (!dryRun && error == null) {
+                    scanningLibrary = true;
+                    toast(galleryScanLabel() + "已提交，后台继续执行");
+                    checkActiveScanTask(false);
+                    refreshCurrentScreen();
+                    return;
+                }
                 showError(galleryScanLabel() + "失败", error);
                 return;
             }
@@ -3635,55 +3768,103 @@ public class MainActivity extends Activity {
         }
     }
 
-    private class ScanLibraryTask extends AsyncTask<Void, Void, ScanResult> {
+    private class StartScanTask extends AsyncTask<Void, Void, String> {
         private final boolean full;
-        private final ScanCallback callback;
+        private final String galleryId;
+        private String snapshot = "{}";
         private String error;
 
-        ScanLibraryTask(boolean full, ScanCallback callback) {
+        StartScanTask(boolean full, String galleryId) {
             this.full = full;
-            this.callback = callback;
+            this.galleryId = galleryId == null ? "" : galleryId;
+        }
+
+        @Override
+        protected String doInBackground(Void... voids) {
+            try {
+                snapshot = albumSnapshotJson(api.getAllAlbums(galleryId));
+                return api.startScan(false, full, galleryId);
+            } catch (Exception e) {
+                error = e.getMessage();
+                return null;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(String taskId) {
+            if (taskId == null || taskId.trim().isEmpty()) {
+                scanningLibrary = false;
+                showError("刷新图库失败", error == null ? "后端没有返回扫描任务" : error);
+                showAlbums(false);
+                return;
+            }
+            saveActiveScanTask(taskId, full, galleryId, snapshot);
+            checkActiveScanTask(true);
+            showAlbums(false);
+        }
+    }
+
+    private class CheckScanTask extends AsyncTask<Void, Void, ScanStatus> {
+        private final String taskId;
+        private final boolean forceMessage;
+        private String error;
+
+        CheckScanTask(String taskId, boolean forceMessage) {
+            this.taskId = taskId;
+            this.forceMessage = forceMessage;
+        }
+
+        @Override
+        protected ScanStatus doInBackground(Void... voids) {
+            try {
+                return api.getScanStatus(taskId);
+            } catch (Exception e) {
+                error = e.getMessage();
+                return null;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(ScanStatus status) {
+            checkingScanStatus = false;
+            if (status == null) {
+                if (forceMessage) showError("扫描状态获取失败", error);
+                return;
+            }
+            if ("completed".equals(status.status)) {
+                handleScanCompleted(status);
+            } else if ("failed".equals(status.status)) {
+                handleScanFailed(status);
+            } else {
+                scanningLibrary = true;
+                if (forceMessage) toast("后台刷新中，可以离开 App，稍后回来会自动更新");
+                scheduleScanStatusPoll();
+            }
+        }
+    }
+
+    private class CompleteScanTask extends AsyncTask<Void, Void, ScanResult> {
+        private final boolean full;
+        private final String galleryId;
+        private final String snapshot;
+        private final ScanStatus status;
+        private String error;
+
+        CompleteScanTask(boolean full, String galleryId, String snapshot, ScanStatus status) {
+            this.full = full;
+            this.galleryId = galleryId == null ? "" : galleryId;
+            this.snapshot = snapshot;
+            this.status = status;
         }
 
         @Override
         protected ScanResult doInBackground(Void... voids) {
             try {
-                List<Album> beforeAlbums = api.getAllAlbums();
-                String taskId = api.startScan(false, full, activeGalleryPrefix);
-                ScanStatus finalStatus = null;
-                if (taskId != null && !taskId.trim().isEmpty()) {
-                    for (int i = 0; i < 150; i++) {
-                        Thread.sleep(2000);
-                        ScanStatus status = api.getScanStatus(taskId);
-                        if ("completed".equals(status.status)) {
-                            finalStatus = status;
-                            break;
-                        }
-                        if ("failed".equals(status.status)) {
-                            throw new Exception(status.error == null || status.error.isEmpty() ? "scan failed" : status.error);
-                        }
-                        if (i == 149) throw new Exception("扫描超时，请稍后手动刷新相册");
-                    }
-                }
-                Map<String, Album> beforeMap = new HashMap<>();
-                for (Album album : beforeAlbums) {
-                    String key = albumKey(album);
-                    if (!key.isEmpty()) beforeMap.put(key, album);
-                }
-                List<Album> afterAlbums = api.getAllAlbums();
-                List<String> changedIds = new ArrayList<>();
-                for (Album album : afterAlbums) {
-                    String key = albumKey(album);
-                    if (key.isEmpty()) continue;
-                    Album before = beforeMap.get(key);
-                    if (before == null || albumChanged(before, album)) {
-                        changedIds.add(key);
-                    }
-                }
+                List<Album> afterAlbums = api.getAllAlbums(galleryId);
                 ScanResult result = new ScanResult();
                 result.ok = true;
-                result.newAlbumIds = changedIds;
-                result.status = finalStatus;
+                result.newAlbumIds = changedAlbumIdsFromSnapshot(snapshot, afterAlbums);
+                result.status = status;
                 return result;
             } catch (Exception e) {
                 error = e.getMessage();
@@ -3693,8 +3874,18 @@ public class MainActivity extends Activity {
 
         @Override
         protected void onPostExecute(ScanResult result) {
-            if (result == null) showError("刷新图库失败", error);
-            callback.done(result);
+            if (result == null) {
+                showError("刷新结果获取失败", error);
+                return;
+            }
+            clearAlbumPageCache();
+            newAlbumIds.clear();
+            newAlbumIds.addAll(result.newAlbumIds);
+            saveNewAlbumIds();
+            activeSort = SORT_NEW;
+            toast(scanCompleteText(result, full));
+            if (SCREEN_ALBUMS.equals(currentScreen)) showAlbums(true);
+            if (SCREEN_DATA_MANAGER.equals(currentScreen)) showDataManager();
         }
     }
 
@@ -3906,7 +4097,7 @@ public class MainActivity extends Activity {
             int page = 1;
             int total = 0;
             do {
-                PageResult<Album> result = getAlbums(page, 200, keyword, sortBy, sortOrder);
+                PageResult<Album> result = getAlbums(page, 200, keyword, sortBy, sortOrder, sourcePrefix);
                 total = result.total;
                 for (Album album : result.items) {
                     if (idSet.contains(album.key()) && galleryMatches(album, sourcePrefix)) {
@@ -3933,11 +4124,15 @@ public class MainActivity extends Activity {
         }
 
         List<Album> getAllAlbums() throws Exception {
+            return getAllAlbums("");
+        }
+
+        List<Album> getAllAlbums(String sourcePrefix) throws Exception {
             List<Album> albums = new ArrayList<>();
             int page = 1;
             int total = 0;
             do {
-                PageResult<Album> result = getAlbums(page, 200, null, "", "");
+                PageResult<Album> result = getAlbums(page, 200, null, "updatedAt", "desc", sourcePrefix);
                 total = result.total;
                 albums.addAll(result.items);
                 page++;
@@ -4444,7 +4639,7 @@ public class MainActivity extends Activity {
                 return value.getByteCount();
             }
         };
-        private final ExecutorService executor = Executors.newFixedThreadPool(4);
+        private final ExecutorService executor = Executors.newFixedThreadPool(6);
 
         void load(ImageView target, String url, String cookie) {
             loadInternal(target, url, cookie, 0);
@@ -4454,7 +4649,26 @@ public class MainActivity extends Activity {
             loadInternal(target, url, cookie, Math.max(dp(180), target.getWidth()));
         }
 
+        void loadPreviewThenOriginal(ImageView target, String thumbnailUrl, String originalUrl, String cookie) {
+            boolean hasPreview = false;
+            if (thumbnailUrl != null && !thumbnailUrl.trim().isEmpty()) {
+                String thumbnailKey = cacheKey(thumbnailUrl, dp(720));
+                Bitmap preview = cache.get(thumbnailKey);
+                if (preview != null) {
+                    hasPreview = true;
+                    target.setAlpha(1f);
+                    target.setImageBitmap(preview);
+                }
+                preloadThumbnail(thumbnailUrl, cookie, dp(720));
+            }
+            loadInternal(target, originalUrl, cookie, 0, hasPreview);
+        }
+
         private void loadInternal(ImageView target, String url, String cookie, int targetSize) {
+            loadInternal(target, url, cookie, targetSize, false);
+        }
+
+        private void loadInternal(ImageView target, String url, String cookie, int targetSize, boolean keepCurrentImage) {
             if (url == null || url.trim().isEmpty()) {
                 target.setTag("");
                 target.setImageDrawable(null);
@@ -4471,10 +4685,10 @@ public class MainActivity extends Activity {
                 target.setImageBitmap(cached);
                 return;
             }
-            target.setAlpha(0.45f);
+            target.setAlpha(keepCurrentImage ? 0.82f : 0.45f);
             target.setBackgroundColor(colorSurfaceTint());
             target.setContentDescription("图片加载中");
-            target.setImageDrawable(null);
+            if (!keepCurrentImage) target.setImageDrawable(null);
             executor.execute(() -> {
                 try {
                     Bitmap bitmap = downloadBitmap(url, cookie, targetSize);
@@ -4499,12 +4713,21 @@ public class MainActivity extends Activity {
         }
 
         void preload(String url, String cookie) {
-            if (url == null || url.trim().isEmpty() || cache.get(url) != null) return;
+            preloadInternal(url, cookie, 0);
+        }
+
+        void preloadThumbnail(String url, String cookie, int targetSize) {
+            preloadInternal(url, cookie, targetSize);
+        }
+
+        private void preloadInternal(String url, String cookie, int targetSize) {
+            String cacheKey = cacheKey(url, targetSize);
+            if (url == null || url.trim().isEmpty() || cache.get(cacheKey) != null) return;
             executor.execute(() -> {
                 try {
-                    if (cache.get(url) != null) return;
-                    Bitmap bitmap = downloadBitmap(url, cookie, 0);
-                    if (bitmap != null) cache.put(url, bitmap);
+                    if (cache.get(cacheKey) != null) return;
+                    Bitmap bitmap = downloadBitmap(url, cookie, targetSize);
+                    if (bitmap != null) cache.put(cacheKey, bitmap);
                 } catch (Exception ignored) {
                 }
             });
@@ -4514,6 +4737,9 @@ public class MainActivity extends Activity {
             HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
+            conn.setUseCaches(true);
+            conn.setRequestProperty("Accept", "image/avif,image/webp,image/*,*/*");
+            conn.setRequestProperty("Connection", "keep-alive");
             if (cookie != null && !cookie.isEmpty()) conn.setRequestProperty("Cookie", cookie);
             InputStream input = new BufferedInputStream(conn.getInputStream());
             Bitmap bitmap = targetSize > 0 ? decodeSampled(input, targetSize) : BitmapFactory.decodeStream(input);

@@ -45,6 +45,7 @@ Admin users can add an album library directory by entering a server-side absolut
 This path is submitted to BackendV2 as a library root; it is not an Android local folder picker.
 Admins can enable or disable registered sources and run a `dryRun=true` scan preview from Android.
 The album list top-right menu exposes the same two refresh modes as the Web UI: incremental refresh sends `dryRun=false, fast=true`, and full-library refresh sends `dryRun=false, fast=false`. When a gallery source is selected, both modes include that source as `galleryId`.
+Refresh/import tasks are submitted to BackendV2 scan tasks and continue on the server after the Android app leaves the album page or moves to the background. Android stores the active `taskId`, checks it again when the app returns, then refreshes the album list and the "new/updated" filter after the backend task completes.
 The album list header has side-by-side tag and sort selectors. Sorting supports update time and album name.
 Data management also exposes per-source incremental import and full-library import. Full-library import uses `fast=false` and traverses the whole selected source, including archive deep parsing.
 
@@ -54,3 +55,4 @@ Album loading is optimized for large libraries:
 - Normal album pages use a small in-memory page cache keyed by server, account, query, sort, and gallery source.
 - The first album page requests 24 albums to reduce initial cover fetch pressure on mobile networks.
 - Album and grid thumbnails are decoded with sampling, while full-screen originals remain full quality.
+- Asset grids preload the next thumbnails, and the image viewer preloads nearby originals. When possible, the viewer shows a cached thumbnail preview immediately before replacing it with the full-resolution original.
