@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { loadConfig, type AppConfig } from "./config.js";
 import { openDatabase, type Database } from "./db/connection.js";
 import { migrate } from "./db/migrate.js";
-import { seed } from "./db/seed.js";
+import { seedAdminUser, seedDemoData } from "./db/seed.js";
 import { fail } from "./lib/api.js";
 import { getAuthUser } from "./lib/auth.js";
 import { albumRoutes } from "./routes/albums.js";
@@ -31,7 +31,8 @@ export const buildApp = async (overrides: Partial<AppConfig> = {}): Promise<Fast
   const config = loadConfig(overrides);
   const db = openDatabase(config.dbPath);
   migrate(db);
-  if (config.seedDemoData) seed(db, config);
+  seedAdminUser(db, config);
+  if (config.seedDemoData) seedDemoData(db);
 
   const app = Fastify({ logger: true });
   app.decorate("config", config);

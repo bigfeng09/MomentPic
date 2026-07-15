@@ -55,6 +55,34 @@ const waitForScanTask = async (
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentpic-v2-smoke-"));
 const legacyPrefix = path.join(tempDir, "legacy-prefix") + path.sep;
 const runtimePrefix = path.join(tempDir, "runtime-prefix") + path.sep;
+
+const noDemoDbPath = path.join(tempDir, "no-demo.sqlite");
+const noDemoApp = await buildApp({
+  dbPath: noDemoDbPath,
+  authSecret: "no-demo-secret",
+  adminUsername: "admin",
+  adminPassword: "no-demo-admin-password",
+  seedDemoData: false,
+  pathPrefixMap: [],
+  thumbnailCacheDir: path.join(tempDir, "no-demo-thumbnail-cache"),
+  libraryRootAllowedPrefixes: [tempDir]
+});
+const noDemoLogin = await noDemoApp.inject({
+  method: "POST",
+  url: "/api/v2/auth/login",
+  payload: { username: "admin", password: "no-demo-admin-password" }
+});
+if (noDemoLogin.statusCode !== 200) {
+  throw new Error(`admin login with demo seed disabled failed: ${noDemoLogin.statusCode} ${noDemoLogin.body}`);
+}
+const noDemoCounts = noDemoApp.db
+  .prepare("SELECT (SELECT COUNT(*) FROM users) AS users, (SELECT COUNT(*) FROM library_roots) AS libraryRoots")
+  .get() as { users: number; libraryRoots: number };
+if (noDemoCounts.users !== 1 || noDemoCounts.libraryRoots !== 0) {
+  throw new Error(`demo-disabled startup seeded unexpected rows: ${JSON.stringify(noDemoCounts)}`);
+}
+await noDemoApp.close();
+
 const app = await buildApp({
   dbPath: path.join(tempDir, "smoke.sqlite"),
   authSecret: "smoke-secret",
@@ -316,17 +344,18 @@ if (invalidSystemConfig.statusCode !== 400) {
   throw new Error(`invalid system config should be 400, got ${invalidSystemConfig.statusCode} ${invalidSystemConfig.body}`);
 }
 
+const serverGalleryPath = path.join(tempDir, "server-gallery").replace(/\\/g, "/");
 const createGallery = await app.inject({
   method: "POST",
   url: "/api/v2/galleries",
   headers: { cookie: authHeader },
-  payload: { name: "Smoke Gallery", path: path.join(tempDir, "server-gallery") }
+  payload: { name: "Smoke Gallery", path: serverGalleryPath }
 });
 const createGalleryData = JSON.parse(createGallery.body).data as { item?: { id: string; name: string; path: string }; scan?: { dryRunAvailable: boolean } };
 if (
   createGallery.statusCode !== 200 ||
   createGalleryData.item?.name !== "Smoke Gallery" ||
-  createGalleryData.item?.path !== path.join(tempDir, "server-gallery") ||
+  createGalleryData.item?.path !== serverGalleryPath ||
   createGalleryData.scan?.dryRunAvailable !== true
 ) {
   throw new Error(`create gallery failed: ${createGallery.statusCode} ${createGallery.body}`);
@@ -336,7 +365,7 @@ const duplicateGallery = await app.inject({
   method: "POST",
   url: "/api/v2/galleries",
   headers: { cookie: authHeader },
-  payload: { name: "Duplicate Gallery", path: path.join(tempDir, "server-gallery") }
+  payload: { name: "Duplicate Gallery", path: serverGalleryPath }
 });
 if (duplicateGallery.statusCode !== 409) {
   throw new Error(`duplicate gallery should be 409, got ${duplicateGallery.statusCode} ${duplicateGallery.body}`);
