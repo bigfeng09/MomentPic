@@ -12,9 +12,8 @@ export const seedAdminUser = (db: Database, config: AppConfig): void => {
   ).run(config.adminUsername, passwordHash, now, now);
 };
 
-export const seed = (db: Database, config: AppConfig): void => {
+export const seedDemoData = (db: Database): void => {
   const now = new Date().toISOString();
-  seedAdminUser(db, config);
 
   db.prepare(
     "INSERT OR IGNORE INTO library_roots (id, name, path, enabled, last_scanned_at, created_at, updated_at) VALUES ('gallery-demo', 'Demo Gallery', '/demo/moment-pic', 1, ?, ?, ?)"
@@ -29,6 +28,11 @@ export const seed = (db: Database, config: AppConfig): void => {
   );
   insertAsset.run("asset-demo-1", "page-001.jpg", ".jpg", "/demo/moment-pic/demo-album/page-001.jpg", "demo-album/page-001.jpg", 1, 1200, 1800, 456789, "seed/asset-demo-1", now, now);
   insertAsset.run("asset-demo-2", "page-002.jpg", ".jpg", "/demo/moment-pic/demo-album/page-002.jpg", "demo-album/page-002.jpg", 2, 1200, 1800, 445566, "seed/asset-demo-2", now, now);
+};
+
+export const seed = (db: Database, config: AppConfig): void => {
+  seedAdminUser(db, config);
+  seedDemoData(db);
 };
 
 if (import.meta.url === `file://${process.argv[1]}`) {

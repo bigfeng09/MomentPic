@@ -102,6 +102,8 @@ docker compose up -d
 curl http://你的服务器IP:3211/api/v2/health
 ```
 
+`MOMENTPIC_SEED_DEMO=false` 只关闭演示图库数据，首次启动仍会创建 `.env` 中配置的管理员。管理员已存在时，修改 `.env` 不会自动重置数据库中的密码；请在登录后通过用户管理功能重置，避免重启覆盖人工修改的密码。
+
 浏览器打开：
 
 ```text

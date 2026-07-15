@@ -10,8 +10,7 @@ services:
     restart: unless-stopped
     network_mode: bridge
     env_file:
-      - path: /mnt/user/appdata/moment-pic-v2/.env
-        required: false
+      - .env
     ports:
       - "3211:3211"
     environment:
@@ -19,9 +18,10 @@ services:
       PORT: "3211"
       MOMENTPIC_DB_PATH: "/app/data/momentpic-v2.sqlite"
       MOMENTPIC_SEED_DEMO: "false"
-      MOMENTPIC_PATH_PREFIX_MAP: '[{"from":"/mnt/user/media/download/moment/","to":"/mnt/user/media/download/moment/download/"}]'
-      MOMENTPIC_LIBRARY_ALLOWED_ROOTS: "/mnt/user/media/download/moment,/mnt/user/media/download"
+      MOMENTPIC_LIBRARY_ALLOWED_ROOTS: "/app/media"
       MOMENTPIC_THUMBNAIL_CACHE_DIR: "/app/data/thumbnails"
+      MOMENTPIC_THUMBNAIL_MAX_SIZE: "640"
     volumes:
-      - /mnt/user/appdata/moment-pic-v2/data:/app/data
-      - /mnt/user/media/download/moment:/mnt/user/media/download/moment:ro
+      - ./data:/app/data
+      # Replace the host-side path with your actual photo directory if needed.
+      - ./media:/app/media:ro

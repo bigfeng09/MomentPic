@@ -25,7 +25,7 @@ npm run build
 npm start
 ```
 
-首次启动会自动执行 migration。默认开启 demo seed，便于本地接口验证。
+首次启动会自动执行 migration。管理员账号始终会在不存在时创建；默认开启 demo seed，便于本地接口验证。`MOMENTPIC_SEED_DEMO=false` 只关闭 demo 图库数据，不会关闭管理员初始化。
 
 默认管理员账号：
 
@@ -33,6 +33,7 @@ npm start
 - 密码：`admin123`
 
 本地正式使用前请设置 `MOMENTPIC_ADMIN_PASSWORD` 和 `MOMENTPIC_AUTH_SECRET`。
+管理员密码环境变量仅用于首次创建该用户名；已有管理员不会在重启时被环境变量覆盖，避免覆盖通过用户管理界面修改的密码。
 
 ## 环境变量
 
@@ -46,7 +47,7 @@ npm start
 | `MOMENTPIC_ADMIN_PASSWORD` | `admin123` | seed 管理员密码 |
 | `MOMENTPIC_COOKIE_NAME` | `moment_pic_v2_auth` | 登录 cookie 名称 |
 | `MOMENTPIC_COOKIE_TTL_SECONDS` | `86400` | 登录有效期 |
-| `MOMENTPIC_SEED_DEMO` | `true` | 是否写入最小 demo 图库/相册/资源 |
+| `MOMENTPIC_SEED_DEMO` | `true` | 是否写入最小 demo 图库/相册/资源；不影响管理员初始化 |
 | `MOMENTPIC_LEGACY_DB_PATH` | 无 | 旧 Moment Pic SQLite 路径，供 `npm run import:legacy` 使用 |
 | `MOMENTPIC_PATH_PREFIX_MAP` | legacy 默认映射 | 文件读取接口的运行时路径前缀映射。未设置时内置 `/mnt/user/media/download/moment/` -> `/mnt/user/media/download/moment/download/`；设置为 `[]` 可关闭默认映射 |
 | `MOMENTPIC_THUMBNAIL_CACHE_DIR` | `data/thumbnails` | 缩略图缓存目录 |
