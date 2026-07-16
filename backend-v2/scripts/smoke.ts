@@ -231,6 +231,15 @@ if (
 ) {
   throw new Error(`default albums sort should be updatedAt desc: ${defaultSortedAlbums.statusCode} ${defaultSortedAlbums.body}`);
 }
+const albumsWithoutTotal = await app.inject({
+  method: "GET",
+  url: "/api/v2/albums?keyword=Sort&page=1&pageSize=1&includeTotal=false",
+  headers: { cookie: authHeader }
+});
+const albumsWithoutTotalPagination = JSON.parse(albumsWithoutTotal.body).data.pagination as { total: number | null; hasMore: boolean };
+if (albumsWithoutTotal.statusCode !== 200 || albumsWithoutTotalPagination.total !== null || albumsWithoutTotalPagination.hasMore !== true) {
+  throw new Error(`albums pagination without count failed: ${albumsWithoutTotal.statusCode} ${albumsWithoutTotal.body}`);
+}
 
 app.db
   .prepare(
@@ -282,6 +291,15 @@ if (
   defaultSortedAssetItems[1]?.id !== "asset-sort-older"
 ) {
   throw new Error(`default assets sort should be sourceMtime desc: ${defaultSortedAssets.statusCode} ${defaultSortedAssets.body}`);
+}
+const assetsWithoutTotal = await app.inject({
+  method: "GET",
+  url: "/api/v2/albums/album-sort-assets/assets?page=1&pageSize=1&includeTotal=false",
+  headers: { cookie: authHeader }
+});
+const assetsWithoutTotalPagination = JSON.parse(assetsWithoutTotal.body).data.pagination as { total: number | null; hasMore: boolean };
+if (assetsWithoutTotal.statusCode !== 200 || assetsWithoutTotalPagination.total !== null || assetsWithoutTotalPagination.hasMore !== true) {
+  throw new Error(`assets pagination without count failed: ${assetsWithoutTotal.statusCode} ${assetsWithoutTotal.body}`);
 }
 
 const scanCompatNow = new Date().toISOString();
@@ -739,6 +757,26 @@ if (original.statusCode !== 200 || original.headers["content-type"] !== "image/j
 if (original.headers["x-momentpic-path-mapped"] !== "false") {
   throw new Error("original path mapped header should be false");
 }
+const originalEtag = String(original.headers.etag ?? "");
+if (!originalEtag || original.headers["accept-ranges"] !== "bytes" || !String(original.headers["cache-control"]).includes("max-age=300")) {
+  throw new Error(`original cache headers missing: ${JSON.stringify(original.headers)}`);
+}
+const originalNotModified = await app.inject({
+  method: "GET",
+  url: "/api/v2/assets/asset-smoke-file/original",
+  headers: { cookie: authHeader, "if-none-match": originalEtag }
+});
+if (originalNotModified.statusCode !== 304) {
+  throw new Error(`original conditional request should be 304: ${originalNotModified.statusCode}`);
+}
+const originalRange = await app.inject({
+  method: "GET",
+  url: "/api/v2/assets/asset-smoke-file/original",
+  headers: { cookie: authHeader, range: "bytes=0-9" }
+});
+if (originalRange.statusCode !== 206 || originalRange.headers["content-length"] !== "10" || !String(originalRange.headers["content-range"]).startsWith("bytes 0-9/")) {
+  throw new Error(`original range request failed: ${originalRange.statusCode} ${JSON.stringify(originalRange.headers)}`);
+}
 
 const thumbnail = await app.inject({
   method: "GET",
@@ -771,6 +809,9 @@ if (cachedThumbnail.statusCode !== 200 || cachedThumbnail.headers["x-momentpic-t
 }
 if (Number(cachedThumbnail.headers["content-length"]) !== generatedThumbnailSize) {
   throw new Error("cached thumbnail size should match generated thumbnail size");
+}
+if (!cachedThumbnail.headers.etag || !String(cachedThumbnail.headers["cache-control"]).includes("max-age=86400")) {
+  throw new Error(`thumbnail cache headers missing: ${JSON.stringify(cachedThumbnail.headers)}`);
 }
 
 const publicAssetShare = await app.inject({

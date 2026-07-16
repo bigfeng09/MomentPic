@@ -41,8 +41,57 @@ export const contentTypeFor = (asset: AssetDto, entryPath?: string): string => {
   return mimeByExtension[extension] ?? "application/octet-stream";
 };
 
-const streamFile = (reply: FastifyReply, filePath: string, stat: fs.Stats, contentType: string) => {
+const etagFor = (stat: fs.Stats): string => `W/"${stat.size.toString(16)}-${Math.trunc(stat.mtimeMs).toString(16)}"`;
+
+const requestHeader = (reply: FastifyReply, name: string): string => {
+  const value = reply.request.headers[name];
+  return Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "");
+};
+
+const isNotModified = (reply: FastifyReply, etag: string, stat: fs.Stats): boolean => {
+  const ifNoneMatch = requestHeader(reply, "if-none-match");
+  if (ifNoneMatch && ifNoneMatch.split(",").some((value) => value.trim() === etag || value.trim() === "*")) return true;
+  if (ifNoneMatch) return false;
+  const ifModifiedSince = Date.parse(requestHeader(reply, "if-modified-since"));
+  return Number.isFinite(ifModifiedSince) && Math.trunc(stat.mtimeMs / 1000) <= Math.trunc(ifModifiedSince / 1000);
+};
+
+const byteRange = (header: string, size: number): { start: number; end: number } | null | "invalid" => {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (!match[1] && !match[2]) || size <= 0) return "invalid";
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isInteger(suffix) || suffix <= 0) return "invalid";
+    return { start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isInteger(start) || !Number.isInteger(requestedEnd) || start < 0 || start >= size || requestedEnd < start) return "invalid";
+  return { start, end: Math.min(size - 1, requestedEnd) };
+};
+
+const streamFile = (reply: FastifyReply, filePath: string, stat: fs.Stats, contentType: string, maxAgeSeconds: number) => {
+  const etag = etagFor(stat);
   reply.header("Content-Type", contentType);
+  reply.header("Cache-Control", `private, max-age=${maxAgeSeconds}, must-revalidate`);
+  reply.header("ETag", etag);
+  reply.header("Last-Modified", stat.mtime.toUTCString());
+  reply.header("Accept-Ranges", "bytes");
+  reply.header("X-Content-Type-Options", "nosniff");
+  if (isNotModified(reply, etag, stat)) return reply.status(304).send();
+
+  const range = byteRange(requestHeader(reply, "range"), stat.size);
+  if (range === "invalid") {
+    reply.header("Content-Range", `bytes */${stat.size}`);
+    return reply.status(416).send();
+  }
+  if (range) {
+    reply.header("Content-Range", `bytes ${range.start}-${range.end}/${stat.size}`);
+    reply.header("Content-Length", String(range.end - range.start + 1));
+    return reply.status(206).send(fs.createReadStream(filePath, range));
+  }
+
   reply.header("Content-Length", String(stat.size));
   return reply.send(fs.createReadStream(filePath));
 };
@@ -70,6 +119,8 @@ const sendArchiveAssetFile = async (
 
     reply.header("X-MomentPic-Path-Mapped", resolved.archive.mapped ? "true" : "false");
     reply.header("Content-Type", contentTypeFor(asset, resolved.entryPath));
+    reply.header("Cache-Control", "private, max-age=300, must-revalidate");
+    reply.header("X-Content-Type-Options", "nosniff");
     const body = await openArchiveEntryBody(resolved);
     if (Buffer.isBuffer(body)) {
       reply.header("Content-Length", String(body.length));
@@ -105,7 +156,7 @@ const sendArchiveAssetFile = async (
   const cacheHeader = thumbnail.status === "hit" || thumbnail.status === "generated" ? thumbnail.status : "fallback";
   reply.header("X-MomentPic-Thumbnail-Cache", cacheHeader);
   if (thumbnail.path && thumbnail.stat && thumbnail.contentType) {
-    return streamFile(reply, thumbnail.path, thumbnail.stat, thumbnail.contentType);
+    return streamFile(reply, thumbnail.path, thumbnail.stat, thumbnail.contentType, 86_400);
   }
 
   reply.header("X-MomentPic-Thumbnail-Fallback", "unsupported");
@@ -142,13 +193,13 @@ export const sendAssetFile = async (
     const cacheHeader = thumbnail.status === "hit" || thumbnail.status === "generated" ? thumbnail.status : "fallback";
     reply.header("X-MomentPic-Thumbnail-Cache", cacheHeader);
     if (thumbnail.path && thumbnail.stat && thumbnail.contentType) {
-      return streamFile(reply, thumbnail.path, thumbnail.stat, thumbnail.contentType);
+      return streamFile(reply, thumbnail.path, thumbnail.stat, thumbnail.contentType, 86_400);
     }
 
     reply.header("X-MomentPic-Thumbnail-Fallback", "original");
   }
 
-  return streamFile(reply, resolved.path, resolved.stat, contentTypeFor(asset));
+  return streamFile(reply, resolved.path, resolved.stat, contentTypeFor(asset), 300);
 };
 
 export interface WarmThumbnailResult {

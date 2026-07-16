@@ -15,11 +15,12 @@ export const fail = (code: number, message: string) => ({
   message
 });
 
-export const pagination = (page: number, pageSize: number, total: number) => ({
+export const pagination = (page: number, pageSize: number, total: number | null, hasMore?: boolean) => ({
   page,
   pageSize,
   total,
-  totalPages: Math.ceil(total / pageSize)
+  totalPages: total === null ? null : Math.ceil(total / pageSize),
+  hasMore: hasMore ?? (total !== null && page * pageSize < total)
 });
 
 export const pageFromQuery = (value: unknown, fallback = 1): number => {

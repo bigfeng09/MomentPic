@@ -15,6 +15,7 @@ export const albumRoutes = async (app: FastifyInstance): Promise<void> => {
       keyword?: string;
       sortBy?: string;
       sortOrder?: string;
+      includeTotal?: string;
     };
     return ok(
       albums.list({
@@ -22,6 +23,7 @@ export const albumRoutes = async (app: FastifyInstance): Promise<void> => {
         keyword: query.keyword,
         sortBy: query.sortBy,
         sortOrder: query.sortOrder,
+        includeTotal: query.includeTotal !== "false",
         user: request.authUser,
         page: pageFromQuery(query.page),
         pageSize: pageSizeFromQuery(query.pageSize, 24, 100)
@@ -39,9 +41,14 @@ export const albumRoutes = async (app: FastifyInstance): Promise<void> => {
 
   app.get("/api/v2/albums/:albumId/assets", async (request, reply) => {
     const { albumId } = request.params as { albumId: string };
-    const query = request.query as { page?: string; pageSize?: string };
+    const query = request.query as { page?: string; pageSize?: string; includeTotal?: string };
     if (!albums.canAccessAlbum(albumId, request.authUser)) return reply.status(403).send(fail(4031, "album not shared with current user"));
-    const payload = assets.listByAlbum(albumId, pageFromQuery(query.page), pageSizeFromQuery(query.pageSize, 120, 300));
+    const payload = assets.listByAlbum(
+      albumId,
+      pageFromQuery(query.page),
+      pageSizeFromQuery(query.pageSize, 120, 300),
+      query.includeTotal !== "false"
+    );
     if (!payload) return reply.status(404).send(fail(4001, "album not found"));
     return ok(payload);
   });

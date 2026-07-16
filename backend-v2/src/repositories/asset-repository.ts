@@ -43,11 +43,10 @@ const toAssetDto = (row: AssetRow): AssetDto => ({
 export class AssetRepository {
   constructor(private readonly db: Database) {}
 
-  listByAlbum(albumId: string, page: number, pageSize: number) {
+  listByAlbum(albumId: string, page: number, pageSize: number, includeTotal = true) {
     const album = this.db.prepare("SELECT id FROM albums WHERE id = ?").get(albumId) as { id: string } | undefined;
     if (!album) return null;
-    const total = (this.db.prepare("SELECT COUNT(*) AS total FROM assets WHERE album_id = ?").get(albumId) as { total: number }).total;
-    const rows = this.db
+    const fetchedRows = this.db
       .prepare(
         `SELECT id, album_id, name, extension, source_type, source_path, relative_path, zip_entry_path, sort_index, width, height, size_bytes, source_mtime, thumbnail_key, created_at, updated_at
          FROM assets
@@ -55,10 +54,15 @@ export class AssetRepository {
          ORDER BY COALESCE(source_mtime, updated_at, created_at) DESC, sort_index ASC, name COLLATE NOCASE ASC, id ASC
          LIMIT ? OFFSET ?`
       )
-      .all(albumId, pageSize, (page - 1) * pageSize) as unknown as AssetRow[];
+      .all(albumId, pageSize + 1, (page - 1) * pageSize) as unknown as AssetRow[];
+    const hasMore = fetchedRows.length > pageSize;
+    const rows = hasMore ? fetchedRows.slice(0, pageSize) : fetchedRows;
+    const total = includeTotal
+      ? (this.db.prepare("SELECT COUNT(*) AS total FROM assets WHERE album_id = ?").get(albumId) as { total: number }).total
+      : null;
     return {
       items: rows.map(toAssetDto),
-      pagination: pagination(page, pageSize, total)
+      pagination: pagination(page, pageSize, total, hasMore)
     };
   }
 
