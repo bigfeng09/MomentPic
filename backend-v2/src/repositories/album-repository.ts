@@ -8,6 +8,7 @@ export interface ListAlbumsOptions {
   sortBy?: string;
   sortOrder?: string;
   user?: AuthUser;
+  includeTotal?: boolean;
   page: number;
   pageSize: number;
 }
@@ -68,9 +69,8 @@ export class AlbumRepository {
     const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
     const sortColumn = sortableColumns[options.sortBy ?? "updatedAt"] ?? "updated_at";
     const sortOrder = String(options.sortOrder ?? "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
-    const total = (this.db.prepare(`SELECT COUNT(*) AS total FROM albums ${where}`).get(...params) as { total: number }).total;
     const offset = (options.page - 1) * options.pageSize;
-    const rows = this.db
+    const fetchedRows = this.db
       .prepare(
         `SELECT id, library_root_id, name, source_type, source_path, cover_asset_id, asset_count, scan_status, error_message, created_at, updated_at
          FROM albums
@@ -78,10 +78,15 @@ export class AlbumRepository {
          ORDER BY ${sortColumn} ${sortOrder}, id ASC
          LIMIT ? OFFSET ?`
       )
-      .all(...params, options.pageSize, offset) as unknown as AlbumRow[];
+      .all(...params, options.pageSize + 1, offset) as unknown as AlbumRow[];
+    const hasMore = fetchedRows.length > options.pageSize;
+    const rows = hasMore ? fetchedRows.slice(0, options.pageSize) : fetchedRows;
+    const total = options.includeTotal === false
+      ? null
+      : (this.db.prepare(`SELECT COUNT(*) AS total FROM albums ${where}`).get(...params) as { total: number }).total;
     return {
       items: rows.map(toAlbumDto),
-      pagination: pagination(options.page, options.pageSize, total)
+      pagination: pagination(options.page, options.pageSize, total, hasMore)
     };
   }
 

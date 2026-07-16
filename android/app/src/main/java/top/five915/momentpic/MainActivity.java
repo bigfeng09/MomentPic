@@ -1,19 +1,18 @@
 package top.five915.momentpic;
 
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.AsyncTask;
 import android.os.Build;
@@ -22,7 +21,6 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import android.content.ContentValues;
 import android.net.Uri;
-import android.util.LruCache;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MenuItem;
@@ -37,7 +35,6 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -48,12 +45,25 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.ComponentActivity;
+import androidx.activity.OnBackPressedCallback;
+import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.RequestBuilder;
+import com.bumptech.glide.load.engine.DiskCacheStrategy;
+import com.bumptech.glide.load.model.GlideUrl;
+import com.bumptech.glide.load.model.LazyHeaders;
+import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions;
+import com.bumptech.glide.signature.ObjectKey;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -71,10 +81,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-public class MainActivity extends Activity {
+public class MainActivity extends ComponentActivity {
     private static final String PREFS = "moment_pic_native";
     private static final String KEY_BASE_URL = "base_url";
     private static final String KEY_USER = "username";
@@ -159,10 +167,12 @@ public class MainActivity extends Activity {
     private List<GallerySource> gallerySources = new ArrayList<>();
     private final LinkedHashMap<String, PageResult<Album>> albumPageCache = new LinkedHashMap<>();
     private Album currentAlbum;
-    private ScrollView albumScrollView;
-    private ScrollView assetScrollView;
+    private RecyclerView albumRecyclerView;
+    private RecyclerView assetRecyclerView;
     private int currentAssetIndex = 0;
+    private int albumScrollPosition = 0;
     private int albumScrollY = 0;
+    private int assetScrollPosition = 0;
     private int assetScrollY = 0;
     private int albumPage = 1;
     private int assetPage = 1;
@@ -195,6 +205,12 @@ public class MainActivity extends Activity {
         role = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ROLE, "user");
         api = new MomentApi(baseUrl);
         imageLoader = new ImageLoader();
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                handleBackNavigation();
+            }
+        });
         loadFavorites();
         loadSearchHistory();
         loadNewAlbumIds();
@@ -494,7 +510,11 @@ public class MainActivity extends Activity {
 
         Button logout = secondaryButton("退出登录");
         logout.setTextColor(colorFavorite());
-        logout.setOnClickListener(v -> showLogin());
+        logout.setOnClickListener(v -> {
+            if (api != null) api.cookieHeader = "";
+            imageLoader.clear();
+            showLogin();
+        });
         LinearLayout.LayoutParams logoutParams = matchWrapWithTop(24);
         logoutParams.height = dp(46);
         content.addView(logout, logoutParams);
@@ -942,6 +962,7 @@ public class MainActivity extends Activity {
             albumPage = 1;
             albumsHasMore = true;
             albumsLoadedOnce = false;
+            albumScrollPosition = 0;
             albumScrollY = 0;
         }
         if (isFavoritesTag()) {
@@ -958,49 +979,40 @@ public class MainActivity extends Activity {
         LinearLayout page = basePage();
         page.addView(albumHeader());
 
-        ScrollView scroll = new ScrollView(this);
-        albumScrollView = scroll;
-        attachPullToRefresh(scroll);
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(14), dp(8), dp(14), dp(18));
-        scroll.addView(content);
+        SwipeRefreshLayout refreshLayout = new SwipeRefreshLayout(this);
+        refreshLayout.setColorSchemeColors(colorPrimary(), colorPrimaryDark());
+        refreshLayout.setProgressBackgroundColorSchemeColor(colorSurface());
+        refreshLayout.setRefreshing(loading);
+        refreshLayout.setOnRefreshListener(() -> {
+            if (loading) return;
+            toast("正在刷新");
+            loadAlbums(true);
+        });
 
-        if (isFavoritesTag()) {
-            content.addView(favoritesOverview());
-        }
+        RecyclerView recycler = new RecyclerView(this);
+        albumRecyclerView = recycler;
+        recycler.setClipToPadding(false);
+        recycler.setPadding(dp(8), dp(8), dp(8), dp(18));
+        recycler.setItemAnimator(null);
+        AlbumGridAdapter adapter = new AlbumGridAdapter();
+        GridLayoutManager layoutManager = new GridLayoutManager(this, 2);
+        layoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+            @Override
+            public int getSpanSize(int position) {
+                return adapter.isFullSpan(position) ? 2 : 1;
+            }
+        });
+        recycler.setLayoutManager(layoutManager);
+        recycler.setAdapter(adapter);
+        refreshLayout.addView(recycler, new SwipeRefreshLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
 
-        GridLayout grid = new GridLayout(this);
-        grid.setColumnCount(2);
-        content.addView(grid, matchWrap());
-        for (Album album : albums) {
-            grid.addView(albumCard(album), gridItemParams());
-        }
-
-        if (loading) {
-            ProgressBar bar = new ProgressBar(this);
-            content.addView(bar, centeredParams(dp(44), dp(44)));
-        } else if (!isFavoritesTag() && isNewSort() && newAlbumIds.isEmpty()) {
-            content.addView(emptyState("本次没有新增或更新", "点击“刷新图库”后，这里只显示本次新增或内容发生变化的相册。"));
-        } else if (isFavoritesTag() && favoriteAssets.isEmpty() && favoriteAlbums.isEmpty()) {
-            content.addView(emptyState("还没有收藏", "收藏图片或相册后，就会出现在这里。"));
-        } else if (albumsLoadedOnce && albums.isEmpty()) {
-            String title = isNewSort() ? "没有匹配的新增或更新内容" : "没找到相册";
-            String message = isNewSort() ? "本次新增或更新里没有匹配当前搜索或标签的相册。" : "换个关键词，或者点“全部”看看。";
-            content.addView(emptyState(title, message));
-        } else if (albumsHasMore) {
-            Button more = secondaryButton("加载更多");
-            more.setOnClickListener(v -> {
-                saveAlbumScroll();
-                loadAlbums(false);
-            });
-            content.addView(more, matchWrapWithTop(12));
-        }
-
-        page.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        page.addView(refreshLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         page.addView(bottomNav(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, navigationBarHeight() + dp(72)));
         root.addView(page, fullScreen());
-        scroll.post(() -> scroll.scrollTo(0, albumScrollY));
+        recycler.post(() -> layoutManager.scrollToPositionWithOffset(albumScrollPosition, albumScrollY));
         loadGallerySourcesIfNeeded();
         checkActiveScanTask(false);
 
@@ -1239,6 +1251,7 @@ public class MainActivity extends Activity {
         card.setOnClickListener(v -> {
             saveAlbumScroll();
             currentAlbum = album;
+            assetScrollPosition = 0;
             assetScrollY = 0;
             assets.clear();
             assetPage = 1;
@@ -1381,40 +1394,26 @@ public class MainActivity extends Activity {
             page.addView(albumFavorite, favParams);
         }
 
-        ScrollView scroll = new ScrollView(this);
-        assetScrollView = scroll;
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(10), dp(10), dp(10), navigationBarHeight() + dp(90));
-        scroll.addView(content);
-
-        GridLayout grid = new GridLayout(this);
-        grid.setColumnCount(2);
-        content.addView(grid, matchWrap());
-        for (int i = 0; i < assets.size(); i++) {
-            grid.addView(assetTile(assets.get(i), i), assetGridParams());
-        }
+        RecyclerView recycler = new RecyclerView(this);
+        assetRecyclerView = recycler;
+        recycler.setClipToPadding(false);
+        recycler.setPadding(dp(7), dp(7), dp(7), navigationBarHeight() + dp(90));
+        recycler.setItemAnimator(null);
+        AssetGridAdapter adapter = new AssetGridAdapter();
+        GridLayoutManager layoutManager = new GridLayoutManager(this, 2);
+        layoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+            @Override
+            public int getSpanSize(int position) {
+                return adapter.isFullSpan(position) ? 2 : 1;
+            }
+        });
+        recycler.setLayoutManager(layoutManager);
+        recycler.setAdapter(adapter);
         preloadAssetThumbnails(0, 24);
 
-        if (loading) {
-            ProgressBar bar = new ProgressBar(this);
-            content.addView(bar, centeredParams(dp(44), dp(44)));
-        } else if (assetsLoadedOnce && assets.isEmpty()) {
-            String title = isFavoritesAlbum() ? "还没有收藏" : "这个相册暂时没有图片";
-            String message = isFavoritesAlbum() ? "在全屏看图时点心型收藏图片。" : "返回相册列表试试其他内容。";
-            content.addView(emptyState(title, message));
-        } else if (!isFavoritesAlbum() && assetsHasMore) {
-            Button more = secondaryButton("加载更多");
-            more.setOnClickListener(v -> {
-                saveAssetScroll();
-                loadAssets(false);
-            });
-            content.addView(more, matchWrapWithTop(12));
-        }
-
-        page.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        page.addView(recycler, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         root.addView(page, fullScreen());
-        scroll.post(() -> scroll.scrollTo(0, assetScrollY));
+        recycler.post(() -> layoutManager.scrollToPositionWithOffset(assetScrollPosition, assetScrollY));
 
         if (!isFavoritesAlbum() && !assetsLoadedOnce && assets.isEmpty() && !loading) {
             loadAssets(true);
@@ -1432,6 +1431,198 @@ public class MainActivity extends Activity {
             showViewer(index);
         });
         return image;
+    }
+
+    private boolean hasAlbumFooter() {
+        return loading
+                || (!isFavoritesTag() && isNewSort() && newAlbumIds.isEmpty())
+                || (isFavoritesTag() && favoriteAssets.isEmpty() && favoriteAlbums.isEmpty())
+                || (albumsLoadedOnce && albums.isEmpty())
+                || albumsHasMore;
+    }
+
+    private View albumFooterView() {
+        LinearLayout footer = new LinearLayout(this);
+        footer.setOrientation(LinearLayout.VERTICAL);
+        footer.setPadding(dp(6), dp(8), dp(6), dp(12));
+        if (loading) {
+            ProgressBar bar = new ProgressBar(this);
+            footer.addView(bar, centeredParams(dp(44), dp(44)));
+        } else if (!isFavoritesTag() && isNewSort() && newAlbumIds.isEmpty()) {
+            footer.addView(emptyState("本次没有新增或更新", "点击“刷新图库”后，这里只显示本次新增或内容发生变化的相册。"));
+        } else if (isFavoritesTag() && favoriteAssets.isEmpty() && favoriteAlbums.isEmpty()) {
+            footer.addView(emptyState("还没有收藏", "收藏图片或相册后，就会出现在这里。"));
+        } else if (albumsLoadedOnce && albums.isEmpty()) {
+            String title = isNewSort() ? "没有匹配的新增或更新内容" : "没找到相册";
+            String message = isNewSort() ? "本次新增或更新里没有匹配当前搜索或标签的相册。" : "换个关键词，或者点“全部”看看。";
+            footer.addView(emptyState(title, message));
+        } else if (albumsHasMore) {
+            Button more = secondaryButton("加载更多");
+            more.setOnClickListener(v -> {
+                saveAlbumScroll();
+                loadAlbums(false);
+            });
+            LinearLayout.LayoutParams params = matchWrapWithTop(8);
+            params.height = dp(46);
+            footer.addView(more, params);
+        }
+        return footer;
+    }
+
+    private boolean hasAssetFooter() {
+        return loading || (assetsLoadedOnce && assets.isEmpty()) || (!isFavoritesAlbum() && assetsHasMore);
+    }
+
+    private View assetFooterView() {
+        LinearLayout footer = new LinearLayout(this);
+        footer.setOrientation(LinearLayout.VERTICAL);
+        footer.setPadding(dp(6), dp(8), dp(6), dp(12));
+        if (loading) {
+            ProgressBar bar = new ProgressBar(this);
+            footer.addView(bar, centeredParams(dp(44), dp(44)));
+        } else if (assetsLoadedOnce && assets.isEmpty()) {
+            String title = isFavoritesAlbum() ? "还没有收藏" : "这个相册暂时没有图片";
+            String message = isFavoritesAlbum() ? "在全屏看图时点心型收藏图片。" : "返回相册列表试试其他内容。";
+            footer.addView(emptyState(title, message));
+        } else if (!isFavoritesAlbum() && assetsHasMore) {
+            Button more = secondaryButton("加载更多");
+            more.setOnClickListener(v -> {
+                saveAssetScroll();
+                loadAssets(false);
+            });
+            LinearLayout.LayoutParams params = matchWrapWithTop(8);
+            params.height = dp(46);
+            footer.addView(more, params);
+        }
+        return footer;
+    }
+
+    private class DynamicViewHolder extends RecyclerView.ViewHolder {
+        final FrameLayout container;
+
+        DynamicViewHolder(FrameLayout container) {
+            super(container);
+            this.container = container;
+        }
+
+        void bind(View child, boolean fillHeight) {
+            imageLoader.clear(container);
+            container.removeAllViews();
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    fillHeight ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            container.addView(child, params);
+        }
+    }
+
+    private class AlbumGridAdapter extends RecyclerView.Adapter<DynamicViewHolder> {
+        private static final int TYPE_OVERVIEW = 1;
+        private static final int TYPE_ALBUM = 2;
+        private static final int TYPE_FOOTER = 3;
+
+        private int overviewCount() {
+            return isFavoritesTag() ? 1 : 0;
+        }
+
+        @Override
+        public int getItemCount() {
+            return overviewCount() + albums.size() + (hasAlbumFooter() ? 1 : 0);
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            if (overviewCount() == 1 && position == 0) return TYPE_OVERVIEW;
+            int albumIndex = position - overviewCount();
+            return albumIndex >= 0 && albumIndex < albums.size() ? TYPE_ALBUM : TYPE_FOOTER;
+        }
+
+        boolean isFullSpan(int position) {
+            return getItemViewType(position) != TYPE_ALBUM;
+        }
+
+        @Override
+        public DynamicViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            FrameLayout container = new FrameLayout(MainActivity.this);
+            RecyclerView.LayoutParams params;
+            if (viewType == TYPE_ALBUM) {
+                params = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(196));
+                params.setMargins(dp(6), dp(6), dp(6), dp(12));
+            } else {
+                params = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                params.setMargins(dp(6), 0, dp(6), 0);
+            }
+            container.setLayoutParams(params);
+            return new DynamicViewHolder(container);
+        }
+
+        @Override
+        public void onBindViewHolder(DynamicViewHolder holder, int position) {
+            int viewType = getItemViewType(position);
+            if (viewType == TYPE_OVERVIEW) {
+                holder.bind(favoritesOverview(), false);
+            } else if (viewType == TYPE_ALBUM) {
+                holder.bind(albumCard(albums.get(position - overviewCount())), true);
+            } else {
+                holder.bind(albumFooterView(), false);
+            }
+        }
+
+        @Override
+        public void onViewRecycled(DynamicViewHolder holder) {
+            imageLoader.clear(holder.container);
+            holder.container.removeAllViews();
+        }
+    }
+
+    private class AssetGridAdapter extends RecyclerView.Adapter<DynamicViewHolder> {
+        private static final int TYPE_ASSET = 1;
+        private static final int TYPE_FOOTER = 2;
+
+        @Override
+        public int getItemCount() {
+            return assets.size() + (hasAssetFooter() ? 1 : 0);
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return position < assets.size() ? TYPE_ASSET : TYPE_FOOTER;
+        }
+
+        boolean isFullSpan(int position) {
+            return getItemViewType(position) == TYPE_FOOTER;
+        }
+
+        @Override
+        public DynamicViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            FrameLayout container = new FrameLayout(MainActivity.this);
+            RecyclerView.LayoutParams params;
+            if (viewType == TYPE_ASSET) {
+                int size = (getResources().getDisplayMetrics().widthPixels - dp(28)) / 2;
+                params = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, size);
+                params.setMargins(dp(3), dp(3), dp(3), dp(3));
+            } else {
+                params = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                params.setMargins(dp(6), 0, dp(6), 0);
+            }
+            container.setLayoutParams(params);
+            return new DynamicViewHolder(container);
+        }
+
+        @Override
+        public void onBindViewHolder(DynamicViewHolder holder, int position) {
+            if (getItemViewType(position) == TYPE_ASSET) {
+                holder.bind(assetTile(assets.get(position), position), true);
+            } else {
+                holder.bind(assetFooterView(), false);
+            }
+        }
+
+        @Override
+        public void onViewRecycled(DynamicViewHolder holder) {
+            imageLoader.clear(holder.container);
+            holder.container.removeAllViews();
+        }
     }
 
     private void showViewer(int index) {
@@ -1809,6 +2000,7 @@ public class MainActivity extends Activity {
             albums.clear();
             albumsHasMore = true;
             albumsLoadedOnce = false;
+            albumScrollPosition = 0;
             albumScrollY = 0;
         }
         showAlbums(false);
@@ -1842,7 +2034,7 @@ public class MainActivity extends Activity {
             albumsLoadedOnce = true;
             albums.addAll(cached.items);
             sortAlbums();
-            albumsHasMore = albums.size() < cached.total;
+            albumsHasMore = cached.hasMore;
             albumPage++;
             showAlbums(false);
             return;
@@ -1854,7 +2046,7 @@ public class MainActivity extends Activity {
                 putCachedAlbumPage(requestedPage, keyword, albumSortBy(), albumSortOrder(), activeGalleryPrefix, result);
                 albums.addAll(result.items);
                 sortAlbums();
-                albumsHasMore = albums.size() < result.total;
+                albumsHasMore = result.hasMore;
                 albumPage++;
             } else {
                 albumsHasMore = false;
@@ -1885,6 +2077,7 @@ public class MainActivity extends Activity {
             assets.clear();
             assetsHasMore = true;
             assetsLoadedOnce = false;
+            assetScrollPosition = 0;
             assetScrollY = 0;
         }
         if (after == null) showAssets();
@@ -1893,7 +2086,7 @@ public class MainActivity extends Activity {
             assetsLoadedOnce = true;
             if (result != null) {
                 assets.addAll(result.items);
-                assetsHasMore = assets.size() < result.total;
+                assetsHasMore = result.hasMore;
                 assetPage++;
             } else {
                 assetsHasMore = false;
@@ -2603,30 +2796,19 @@ public class MainActivity extends Activity {
     }
 
     private void saveAlbumScroll() {
-        if (albumScrollView != null) albumScrollY = albumScrollView.getScrollY();
+        if (albumRecyclerView == null || !(albumRecyclerView.getLayoutManager() instanceof GridLayoutManager)) return;
+        GridLayoutManager layoutManager = (GridLayoutManager) albumRecyclerView.getLayoutManager();
+        albumScrollPosition = Math.max(0, layoutManager.findFirstVisibleItemPosition());
+        View first = layoutManager.findViewByPosition(albumScrollPosition);
+        albumScrollY = first == null ? 0 : first.getTop() - albumRecyclerView.getPaddingTop();
     }
 
     private void saveAssetScroll() {
-        if (assetScrollView != null) assetScrollY = assetScrollView.getScrollY();
-    }
-
-    private void attachPullToRefresh(ScrollView scroll) {
-        final float[] startY = {0f};
-        final boolean[] tracking = {false};
-        scroll.setOnTouchListener((v, event) -> {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN) {
-                tracking[0] = scroll.getScrollY() == 0;
-                startY[0] = event.getY();
-            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                if (tracking[0] && scroll.getScrollY() == 0 && event.getY() - startY[0] > dp(82) && !loading) {
-                    toast("正在刷新");
-                    loadAlbums(true);
-                }
-                tracking[0] = false;
-            }
-            return false;
-        });
+        if (assetRecyclerView == null || !(assetRecyclerView.getLayoutManager() instanceof GridLayoutManager)) return;
+        GridLayoutManager layoutManager = (GridLayoutManager) assetRecyclerView.getLayoutManager();
+        assetScrollPosition = Math.max(0, layoutManager.findFirstVisibleItemPosition());
+        View first = layoutManager.findViewByPosition(assetScrollPosition);
+        assetScrollY = first == null ? 0 : first.getTop() - assetRecyclerView.getPaddingTop();
     }
 
     private LinearLayout basePage() {
@@ -3018,22 +3200,6 @@ public class MainActivity extends Activity {
         return params;
     }
 
-    private GridLayout.LayoutParams gridItemParams() {
-        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
-        params.width = (getResources().getDisplayMetrics().widthPixels - dp(52)) / 2;
-        params.height = dp(196);
-        params.setMargins(dp(6), dp(6), dp(6), dp(12));
-        return params;
-    }
-
-    private GridLayout.LayoutParams assetGridParams() {
-        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
-        params.width = (getResources().getDisplayMetrics().widthPixels - dp(32)) / 2;
-        params.height = params.width;
-        params.setMargins(dp(3), dp(3), dp(3), dp(3));
-        return params;
-    }
-
     private LinearLayout.LayoutParams matchWrap() {
         return new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -3105,8 +3271,7 @@ public class MainActivity extends Activity {
         return value.startsWith("/") || value.matches("^[A-Za-z]:/.*");
     }
 
-    @Override
-    public void onBackPressed() {
+    private void handleBackNavigation() {
         if (SCREEN_VIEWER.equals(currentScreen) || viewerOpen) {
             showAssets();
             return;
@@ -3140,7 +3305,7 @@ public class MainActivity extends Activity {
             moveTaskToBack(true);
             return;
         }
-        super.onBackPressed();
+        moveTaskToBack(true);
     }
 
     private interface BoolCallback {
@@ -3236,7 +3401,7 @@ public class MainActivity extends Activity {
                         saveAssetToLocal(asset, album.name);
                         count++;
                     }
-                    if (page * 120 >= result.total) break;
+                    if (!result.hasMore) break;
                     page++;
                 }
                 return count;
@@ -4039,7 +4204,7 @@ public class MainActivity extends Activity {
         }
 
         PageResult<Album> getAlbums(int page, int pageSize, String keyword, String sortBy, String sortOrder, String sourcePrefix) throws Exception {
-            String path = "/api/v2/albums?page=" + page + "&pageSize=" + pageSize;
+            String path = "/api/v2/albums?page=" + page + "&pageSize=" + pageSize + "&includeTotal=false";
             if (sourcePrefix != null && !sourcePrefix.trim().isEmpty()) {
                 path += "&galleryId=" + URLEncoder.encode(sourcePrefix.trim(), "UTF-8");
             }
@@ -4058,7 +4223,10 @@ public class MainActivity extends Activity {
             for (int i = 0; i < items.length(); i++) {
                 albums.add(Album.from(items.getJSONObject(i)));
             }
-            return new PageResult<>(albums, data.getJSONObject("pagination").getInt("total"));
+            JSONObject pagination = data.getJSONObject("pagination");
+            int total = pagination.optInt("total", -1);
+            boolean hasMore = pagination.has("hasMore") ? pagination.optBoolean("hasMore", false) : total >= 0 && page * pageSize < total;
+            return new PageResult<>(albums, total, hasMore);
         }
 
         List<GallerySource> getGallerySources() throws Exception {
@@ -4095,10 +4263,8 @@ public class MainActivity extends Activity {
             Set<String> idSet = new HashSet<>(newIds);
             List<Album> filtered = new ArrayList<>();
             int page = 1;
-            int total = 0;
             do {
                 PageResult<Album> result = getAlbums(page, 200, keyword, sortBy, sortOrder, sourcePrefix);
-                total = result.total;
                 for (Album album : result.items) {
                     if (idSet.contains(album.key()) && galleryMatches(album, sourcePrefix)) {
                         ensureAlbumCover(album);
@@ -4106,9 +4272,9 @@ public class MainActivity extends Activity {
                     }
                 }
                 page++;
-                if ((page - 1) * 200 >= total) break;
+                if (!result.hasMore) break;
             } while (true);
-            return new PageResult<>(filtered, filtered.size());
+            return new PageResult<>(filtered, filtered.size(), false);
         }
 
         private void ensureAlbumCover(Album album) throws Exception {
@@ -4130,19 +4296,17 @@ public class MainActivity extends Activity {
         List<Album> getAllAlbums(String sourcePrefix) throws Exception {
             List<Album> albums = new ArrayList<>();
             int page = 1;
-            int total = 0;
             do {
                 PageResult<Album> result = getAlbums(page, 200, null, "updatedAt", "desc", sourcePrefix);
-                total = result.total;
                 albums.addAll(result.items);
                 page++;
-                if ((page - 1) * 200 >= total) break;
+                if (!result.hasMore) break;
             } while (true);
             return albums;
         }
 
         PageResult<Asset> getAssets(String albumId, int page, int pageSize) throws Exception {
-            JSONObject data = data(request("GET", "/api/v2/albums/" + URLEncoder.encode(albumId, "UTF-8") + "/assets?page=" + page + "&pageSize=" + pageSize, null));
+            JSONObject data = data(request("GET", "/api/v2/albums/" + URLEncoder.encode(albumId, "UTF-8") + "/assets?page=" + page + "&pageSize=" + pageSize + "&includeTotal=false", null));
             JSONArray items = data.getJSONArray("items");
             List<Asset> assets = new ArrayList<>();
             for (int i = 0; i < items.length(); i++) {
@@ -4150,7 +4314,10 @@ public class MainActivity extends Activity {
                 if (asset.albumId == null || asset.albumId.trim().isEmpty()) asset.albumId = albumId;
                 assets.add(asset);
             }
-            return new PageResult<>(assets, data.getJSONObject("pagination").getInt("total"));
+            JSONObject pagination = data.getJSONObject("pagination");
+            int total = pagination.optInt("total", -1);
+            boolean hasMore = pagination.has("hasMore") ? pagination.optBoolean("hasMore", false) : total >= 0 && page * pageSize < total;
+            return new PageResult<>(assets, total, hasMore);
         }
 
         String startScan(boolean dryRun, boolean full, String galleryId) throws Exception {
@@ -4513,10 +4680,16 @@ public class MainActivity extends Activity {
     private static class PageResult<T> {
         final List<T> items;
         final int total;
+        final boolean hasMore;
 
         PageResult(List<T> items, int total) {
+            this(items, total, total >= 0 && items.size() < total);
+        }
+
+        PageResult(List<T> items, int total, boolean hasMore) {
             this.items = items;
             this.total = total;
+            this.hasMore = hasMore;
         }
     }
 
@@ -4633,153 +4806,99 @@ public class MainActivity extends Activity {
     }
 
     private class ImageLoader {
-        private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(32 * 1024 * 1024) {
-            @Override
-            protected int sizeOf(String key, Bitmap value) {
-                return value.getByteCount();
-            }
-        };
-        private final ExecutorService executor = Executors.newFixedThreadPool(6);
-
         void load(ImageView target, String url, String cookie) {
-            loadInternal(target, url, cookie, 0);
+            if (!prepareTarget(target, url)) return;
+            request(url, cookie)
+                    .fitCenter()
+                    .into(target);
         }
 
         void loadThumbnail(ImageView target, String url, String cookie) {
-            loadInternal(target, url, cookie, Math.max(dp(180), target.getWidth()));
+            if (!prepareTarget(target, url)) return;
+            int targetSize = Math.max(dp(180), Math.max(target.getWidth(), getResources().getDisplayMetrics().widthPixels / 2));
+            request(url, cookie)
+                    .override(targetSize, targetSize)
+                    .centerCrop()
+                    .into(target);
         }
 
         void loadPreviewThenOriginal(ImageView target, String thumbnailUrl, String originalUrl, String cookie) {
-            boolean hasPreview = false;
-            if (thumbnailUrl != null && !thumbnailUrl.trim().isEmpty()) {
-                String thumbnailKey = cacheKey(thumbnailUrl, dp(720));
-                Bitmap preview = cache.get(thumbnailKey);
-                if (preview != null) {
-                    hasPreview = true;
-                    target.setAlpha(1f);
-                    target.setImageBitmap(preview);
-                }
-                preloadThumbnail(thumbnailUrl, cookie, dp(720));
+            String source = originalUrl == null || originalUrl.trim().isEmpty() ? thumbnailUrl : originalUrl;
+            if (!prepareTarget(target, source)) return;
+            RequestBuilder<Drawable> full = request(source, cookie).fitCenter();
+            if (thumbnailUrl != null && !thumbnailUrl.trim().isEmpty() && !thumbnailUrl.equals(source)) {
+                full = full.thumbnail(
+                        request(thumbnailUrl, cookie)
+                                .override(dp(720), dp(720))
+                                .fitCenter()
+                );
             }
-            loadInternal(target, originalUrl, cookie, 0, hasPreview);
-        }
-
-        private void loadInternal(ImageView target, String url, String cookie, int targetSize) {
-            loadInternal(target, url, cookie, targetSize, false);
-        }
-
-        private void loadInternal(ImageView target, String url, String cookie, int targetSize, boolean keepCurrentImage) {
-            if (url == null || url.trim().isEmpty()) {
-                target.setTag("");
-                target.setImageDrawable(null);
-                target.setAlpha(0.45f);
-                target.setBackgroundColor(colorSurfaceTint());
-                target.setContentDescription("暂无图片");
-                return;
-            }
-            String cacheKey = cacheKey(url, targetSize);
-            target.setTag(cacheKey);
-            Bitmap cached = cache.get(cacheKey);
-            if (cached != null) {
-                target.setAlpha(1f);
-                target.setImageBitmap(cached);
-                return;
-            }
-            target.setAlpha(keepCurrentImage ? 0.82f : 0.45f);
-            target.setBackgroundColor(colorSurfaceTint());
-            target.setContentDescription("图片加载中");
-            if (!keepCurrentImage) target.setImageDrawable(null);
-            executor.execute(() -> {
-                try {
-                    Bitmap bitmap = downloadBitmap(url, cookie, targetSize);
-                    if (bitmap != null) cache.put(cacheKey, bitmap);
-                    target.post(() -> {
-                        if (cacheKey.equals(target.getTag()) && bitmap != null) {
-                            target.setAlpha(1f);
-                            target.setContentDescription("图片");
-                            target.setImageBitmap(bitmap);
-                        }
-                    });
-                } catch (Exception ignored) {
-                    target.post(() -> {
-                        if (cacheKey.equals(target.getTag())) {
-                            target.setAlpha(0.55f);
-                            target.setContentDescription("图片加载失败");
-                            target.setImageDrawable(null);
-                        }
-                    });
-                }
-            });
+            full.into(target);
         }
 
         void preload(String url, String cookie) {
-            preloadInternal(url, cookie, 0);
+            if (url == null || url.trim().isEmpty()) return;
+            request(url, cookie)
+                    .fitCenter()
+                    .preload(getResources().getDisplayMetrics().widthPixels, getResources().getDisplayMetrics().heightPixels);
         }
 
         void preloadThumbnail(String url, String cookie, int targetSize) {
-            preloadInternal(url, cookie, targetSize);
+            if (url == null || url.trim().isEmpty()) return;
+            int size = Math.max(dp(180), targetSize);
+            request(url, cookie)
+                    .override(size, size)
+                    .centerCrop()
+                    .preload(size, size);
         }
 
-        private void preloadInternal(String url, String cookie, int targetSize) {
-            String cacheKey = cacheKey(url, targetSize);
-            if (url == null || url.trim().isEmpty() || cache.get(cacheKey) != null) return;
-            executor.execute(() -> {
-                try {
-                    if (cache.get(cacheKey) != null) return;
-                    Bitmap bitmap = downloadBitmap(url, cookie, targetSize);
-                    if (bitmap != null) cache.put(cacheKey, bitmap);
-                } catch (Exception ignored) {
-                }
-            });
+        private boolean prepareTarget(ImageView target, String url) {
+            Glide.with(MainActivity.this).clear(target);
+            target.setBackgroundColor(colorSurfaceTint());
+            if (url == null || url.trim().isEmpty()) {
+                target.setImageDrawable(null);
+                target.setAlpha(0.45f);
+                target.setContentDescription("暂无图片");
+                return false;
+            }
+            target.setAlpha(1f);
+            target.setContentDescription("图片加载中");
+            return true;
         }
 
-        private Bitmap downloadBitmap(String url, String cookie, int targetSize) throws Exception {
-            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(30000);
-            conn.setUseCaches(true);
-            conn.setRequestProperty("Accept", "image/avif,image/webp,image/*,*/*");
-            conn.setRequestProperty("Connection", "keep-alive");
-            if (cookie != null && !cookie.isEmpty()) conn.setRequestProperty("Cookie", cookie);
-            InputStream input = new BufferedInputStream(conn.getInputStream());
-            Bitmap bitmap = targetSize > 0 ? decodeSampled(input, targetSize) : BitmapFactory.decodeStream(input);
-            input.close();
-            conn.disconnect();
-            return bitmap;
+        private RequestBuilder<Drawable> request(String url, String cookie) {
+            LazyHeaders.Builder headers = new LazyHeaders.Builder()
+                    .addHeader("Accept", "image/avif,image/webp,image/*,*/*");
+            if (cookie != null && !cookie.isEmpty()) headers.addHeader("Cookie", cookie);
+            GlideUrl model = new GlideUrl(url, headers.build());
+            return Glide.with(MainActivity.this)
+                    .load(model)
+                    .signature(new ObjectKey(authCacheSignature(cookie)))
+                    .diskCacheStrategy(DiskCacheStrategy.AUTOMATIC)
+                    .placeholder(new ColorDrawable(colorSurfaceTint()))
+                    .error(new ColorDrawable(colorSurfaceTint()))
+                    .transition(DrawableTransitionOptions.withCrossFade(140));
         }
 
-        private Bitmap decodeSampled(InputStream input, int targetSize) throws Exception {
-            byte[] bytes = readBytes(input);
-            BitmapFactory.Options bounds = new BitmapFactory.Options();
-            bounds.inJustDecodeBounds = true;
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inSampleSize = sampleSize(bounds, Math.max(dp(180), targetSize));
-            return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+        private String authCacheSignature(String cookie) {
+            String scope = baseUrl + "|" + username + "|" + (cookie == null ? "" : cookie);
+            return Integer.toHexString(scope.hashCode());
         }
 
-        private byte[] readBytes(InputStream input) throws Exception {
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            byte[] buffer = new byte[16 * 1024];
-            int read;
-            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
-            return output.toByteArray();
-        }
-
-        private int sampleSize(BitmapFactory.Options options, int targetSize) {
-            int width = options.outWidth;
-            int height = options.outHeight;
-            int sample = 1;
-            while (width / (sample * 2) >= targetSize && height / (sample * 2) >= targetSize) sample *= 2;
-            return Math.max(1, sample);
-        }
-
-        private String cacheKey(String url, int targetSize) {
-            return targetSize > 0 ? url + "#thumb" : url;
+        void clear(View view) {
+            if (view instanceof ImageView) {
+                Glide.with(MainActivity.this).clear(view);
+                return;
+            }
+            if (view instanceof ViewGroup) {
+                ViewGroup group = (ViewGroup) view;
+                for (int i = 0; i < group.getChildCount(); i++) clear(group.getChildAt(i));
+            }
         }
 
         void clear() {
-            cache.evictAll();
+            Glide.get(MainActivity.this).clearMemory();
+            new Thread(() -> Glide.get(MainActivity.this).clearDiskCache(), "momentpic-glide-cache-clear").start();
         }
     }
 }
