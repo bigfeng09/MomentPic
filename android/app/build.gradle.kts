@@ -2,6 +2,11 @@ plugins {
     id("com.android.application")
 }
 
+val releaseStorePath = providers.environmentVariable("MOMENTPIC_ANDROID_KEYSTORE").orNull
+val releaseStorePassword = providers.environmentVariable("MOMENTPIC_ANDROID_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("MOMENTPIC_ANDROID_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("MOMENTPIC_ANDROID_KEY_PASSWORD").orNull
+
 android {
     namespace = "top.five915.momentpic"
     compileSdk = 36
@@ -10,8 +15,28 @@ android {
         applicationId = "top.five915.momentpic"
         minSdk = 23
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "1.2.0-beta1"
+    }
+
+    signingConfigs {
+        if (!releaseStorePath.isNullOrBlank()
+            && !releaseStorePassword.isNullOrBlank()
+            && !releaseKeyAlias.isNullOrBlank()
+            && !releaseKeyPassword.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(releaseStorePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
+        }
     }
 
     compileOptions {

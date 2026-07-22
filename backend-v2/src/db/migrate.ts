@@ -16,6 +16,10 @@ export const migrate = (db: Database): void => {
   ensureColumn(db, "scan_tasks", "skipped_files", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "scan_tasks", "unchanged_albums", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "scan_tasks", "unchanged_assets", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "public_shares", "expires_at", "TEXT");
+  ensureColumn(db, "public_shares", "password_hash", "TEXT");
+  ensureColumn(db, "public_shares", "allow_original", "INTEGER NOT NULL DEFAULT 1");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_public_shares_expires ON public_shares (expires_at);");
   const now = new Date().toISOString();
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (1, 'initial_v2_schema', ?)").run(now);
   db.prepare(

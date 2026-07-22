@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { fail, ok } from "../lib/api.js";
 import { archiveReadiness } from "../services/archive-zip.js";
@@ -24,6 +25,20 @@ const backendUrlFor = (request: FastifyRequest): string => {
   const proto = forwardedProto || (request.protocol === "https" ? "https" : "http");
   const host = request.headers.host || `127.0.0.1:${request.server.config.port}`;
   return `${proto}://${host}`;
+};
+
+const storageStatus = (dbPath: string) => {
+  try {
+    const databaseBytes = fs.statSync(dbPath).size;
+    const disk = fs.statfsSync(dbPath);
+    return {
+      databaseBytes,
+      diskTotalBytes: disk.blocks * disk.bsize,
+      diskFreeBytes: disk.bavail * disk.bsize
+    };
+  } catch {
+    return { databaseBytes: 0, diskTotalBytes: null, diskFreeBytes: null };
+  }
 };
 
 export const systemRoutes = async (app: FastifyInstance): Promise<void> => {
@@ -94,7 +109,8 @@ export const systemRoutes = async (app: FastifyInstance): Promise<void> => {
         cookieTtlSeconds: app.config.cookieTtlSeconds,
         seedDemoData: app.config.seedDemoData,
         pathPrefixMapRules: app.config.pathPrefixMap.length
-      }
+      },
+      storage: storageStatus(app.config.dbPath)
     });
   });
 
