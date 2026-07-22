@@ -1,6 +1,9 @@
 package top.five915.momentpic;
 
 import android.app.AlertDialog;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -14,12 +17,13 @@ import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.content.ContentValues;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -32,6 +36,7 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
+import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -42,6 +47,7 @@ import android.widget.PopupMenu;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Switch;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -53,10 +59,14 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.RequestBuilder;
+import com.bumptech.glide.load.DataSource;
 import com.bumptech.glide.load.engine.DiskCacheStrategy;
+import com.bumptech.glide.load.engine.GlideException;
 import com.bumptech.glide.load.model.GlideUrl;
 import com.bumptech.glide.load.model.LazyHeaders;
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions;
+import com.bumptech.glide.request.RequestListener;
+import com.bumptech.glide.request.target.Target;
 import com.bumptech.glide.signature.ObjectKey;
 
 import org.json.JSONArray;
@@ -72,6 +82,7 @@ import java.io.FileOutputStream;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.net.URL;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -81,6 +92,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.Date;
+import java.util.UUID;
 
 public class MainActivity extends ComponentActivity {
     private static final String PREFS = "moment_pic_native";
@@ -99,6 +112,8 @@ public class MainActivity extends ComponentActivity {
     private static final String KEY_ACTIVE_SCAN_FULL = "active_scan_full";
     private static final String KEY_ACTIVE_SCAN_GALLERY = "active_scan_gallery";
     private static final String KEY_ACTIVE_SCAN_SNAPSHOT = "active_scan_snapshot";
+    private static final String KEY_DOWNLOAD_JOBS = "download_jobs";
+    private static final String KEY_WIFI_ONLY = "download_wifi_only";
     private static final String DEFAULT_BASE_URL = "http://10.0.2.2:3211";
     private static final String TAG_ALL = "全部";
     private static final String TAG_FAVORITES = "收藏";
@@ -135,6 +150,7 @@ public class MainActivity extends ComponentActivity {
     private static final String ICON_CLOSE = "close";
     private static final String ICON_ZOOM_RESET = "zoom_reset";
     private static final String ICON_ZOOM_IN = "zoom_in";
+    private static final String ICON_CLOCK = "clock";
     private static final String SCREEN_LOGIN = "login";
     private static final String SCREEN_ALBUMS = "albums";
     private static final String SCREEN_ASSETS = "assets";
@@ -143,6 +159,10 @@ public class MainActivity extends ComponentActivity {
     private static final String SCREEN_DATA_MANAGER = "data_manager";
     private static final String SCREEN_USER_MANAGER = "user_manager";
     private static final String SCREEN_ACCOUNT_DETAIL = "account_detail";
+    private static final String SCREEN_TIMELINE = "timeline";
+    private static final String SCREEN_DOWNLOADS = "downloads";
+    private static final String SCREEN_PUBLIC_SHARES = "public_shares";
+    private static final String TIMELINE_ALBUM_ID = "__timeline__";
     private static final int ALBUM_PAGE_SIZE = 24;
     private static final int ASSET_PAGE_SIZE = 60;
     private static final int MAX_ALBUM_PAGE_CACHE = 24;
@@ -159,6 +179,10 @@ public class MainActivity extends ComponentActivity {
     private String activeAlbumSort = ALBUM_SORT_UPDATED;
     private List<Album> albums = new ArrayList<>();
     private List<Asset> assets = new ArrayList<>();
+    private List<Asset> timelineAssets = new ArrayList<>();
+    private List<DownloadJob> downloadJobs = new ArrayList<>();
+    private List<PublicShare> publicShares = new ArrayList<>();
+    private boolean loadingPublicShares = false;
     private List<Asset> favoriteAssets = new ArrayList<>();
     private List<Album> favoriteAlbums = new ArrayList<>();
     private List<String> searchHistory = new ArrayList<>();
@@ -169,18 +193,36 @@ public class MainActivity extends ComponentActivity {
     private Album currentAlbum;
     private RecyclerView albumRecyclerView;
     private RecyclerView assetRecyclerView;
+    private RecyclerView timelineRecyclerView;
     private int currentAssetIndex = 0;
     private int albumScrollPosition = 0;
     private int albumScrollY = 0;
     private int assetScrollPosition = 0;
     private int assetScrollY = 0;
+    private int timelineScrollPosition = 0;
+    private int timelineScrollY = 0;
     private int albumPage = 1;
     private int assetPage = 1;
+    private int timelinePage = 1;
+    private boolean timelineHasMore = true;
+    private boolean timelineLoadedOnce = false;
+    private String timelineLoadError = "";
+    private String timelineKeyword = "";
+    private String timelineFrom = "";
+    private String timelineTo = "";
+    private String timelineOrientation = "";
+    private String timelineExtension = "";
+    private boolean downloadQueueRunning = false;
+    private SystemStatus systemStatus;
+    private boolean loadingSystemStatus = false;
+    private String systemStatusError = "";
     private boolean loading = false;
     private boolean albumsHasMore = true;
     private boolean assetsHasMore = true;
     private boolean albumsLoadedOnce = false;
     private boolean assetsLoadedOnce = false;
+    private String albumLoadError = "";
+    private String assetLoadError = "";
     private boolean viewerOpen = false;
     private boolean scanningLibrary = false;
     private boolean loadingGallerySources = false;
@@ -214,6 +256,8 @@ public class MainActivity extends ComponentActivity {
         loadFavorites();
         loadSearchHistory();
         loadNewAlbumIds();
+        loadDownloadJobs();
+        createDownloadNotificationChannel();
         showLogin();
     }
 
@@ -311,6 +355,12 @@ public class MainActivity extends ComponentActivity {
             showViewer(currentAssetIndex);
         } else if (SCREEN_ASSETS.equals(currentScreen) && currentAlbum != null) {
             showAssets();
+        } else if (SCREEN_TIMELINE.equals(currentScreen)) {
+            showTimeline(false);
+        } else if (SCREEN_DOWNLOADS.equals(currentScreen)) {
+            showDownloads();
+        } else if (SCREEN_PUBLIC_SHARES.equals(currentScreen)) {
+            showPublicShares(false);
         } else if (SCREEN_ACCOUNT_DETAIL.equals(currentScreen) && !currentAccountDetailUser.isEmpty()) {
             showAccountShareDetail(currentAccountDetailUser);
         } else if (SCREEN_USER_MANAGER.equals(currentScreen)) {
@@ -355,6 +405,47 @@ public class MainActivity extends ComponentActivity {
         EditText passInput = input("密码", savedPassword);
         passInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
         page.addView(urlInput, inputParams());
+
+        TextView connectionStatus = text("建议先测试服务器，确认手机能够访问后端", 12, colorMuted(), false);
+        connectionStatus.setPadding(dp(12), dp(10), dp(12), dp(10));
+        connectionStatus.setBackground(roundedBackground(colorSurfaceTint(), colorStroke(), 12));
+        LinearLayout.LayoutParams connectionStatusParams = matchWrapWithTop(8);
+        page.addView(connectionStatus, connectionStatusParams);
+
+        Button testConnection = secondaryButton("测试服务器连接");
+        testConnection.setOnClickListener(v -> {
+            String candidateUrl = normalizeUrl(urlInput.getText().toString());
+            if (candidateUrl.isEmpty()) {
+                connectionStatus.setText("请先填写服务器地址");
+                connectionStatus.setTextColor(colorFavorite());
+                return;
+            }
+            urlInput.setText(candidateUrl);
+            testConnection.setEnabled(false);
+            testConnection.setText("正在连接...");
+            connectionStatus.setText("正在检查服务器健康状态");
+            connectionStatus.setTextColor(colorMuted());
+            MomentApi candidateApi = new MomentApi(candidateUrl);
+            testConnectionAsync(candidateApi, (version, error) -> {
+                testConnection.setEnabled(true);
+                testConnection.setText("测试服务器连接");
+                if (error == null || error.isEmpty()) {
+                    boolean secure = candidateUrl.startsWith("https://");
+                    connectionStatus.setText(String.format(
+                            Locale.CHINA,
+                            "连接成功 · 后端 %s%s",
+                            version,
+                            secure ? " · HTTPS" : " · HTTP（仅建议可信内网使用）"));
+                    connectionStatus.setTextColor(darkMode ? 0xFF79D5A3 : 0xFF267A52);
+                } else {
+                    connectionStatus.setText(connectionErrorMessage(error));
+                    connectionStatus.setTextColor(colorFavorite());
+                }
+            });
+        });
+        LinearLayout.LayoutParams testParams = matchWrapWithTop(8);
+        testParams.height = dp(44);
+        page.addView(testConnection, testParams);
         page.addView(userInput, inputParams());
         page.addView(passInput, inputParams());
 
@@ -378,6 +469,8 @@ public class MainActivity extends ComponentActivity {
             }
             login.setEnabled(false);
             login.setText("登录中...");
+            connectionStatus.setText("正在连接服务器并验证账号");
+            connectionStatus.setTextColor(colorMuted());
             baseUrl = url;
             username = user;
             api = new MomentApi(baseUrl);
@@ -386,6 +479,9 @@ public class MainActivity extends ComponentActivity {
                 login.setEnabled(true);
                 login.setText("登录");
                 if (ok) {
+                    albumLoadError = "";
+                    assetLoadError = "";
+                    connectionStatus.setText("登录成功，正在进入图库");
                     role = api.role;
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                             .putString(KEY_BASE_URL, baseUrl)
@@ -395,7 +491,13 @@ public class MainActivity extends ComponentActivity {
                             .putString(KEY_PASSWORD, remember.isChecked() ? pass : "")
                             .apply();
                     loadFavorites();
-                    new PullFavoriteAlbumsTask(() -> showAlbums(true)).execute();
+                    new PullFavoriteAlbumsTask(() -> {
+                        showAlbums(true);
+                        runNextDownload();
+                    }).execute();
+                } else {
+                    connectionStatus.setText("登录未完成，请检查上方信息后重试");
+                    connectionStatus.setTextColor(colorFavorite());
                 }
             }).execute();
         });
@@ -403,7 +505,11 @@ public class MainActivity extends ComponentActivity {
         loginParams.setMargins(0, dp(12), 0, 0);
         page.addView(login, loginParams);
 
-        root.addView(page, fullScreen());
+        ScrollView loginScroll = new ScrollView(this);
+        loginScroll.setFillViewport(true);
+        loginScroll.addView(page, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(loginScroll, fullScreen());
     }
 
     private void showSettings() {
@@ -422,36 +528,32 @@ public class MainActivity extends ComponentActivity {
         content.setPadding(dp(18), dp(8), dp(18), navigationBarHeight() + dp(24));
         scroll.addView(content);
 
-        TextView accountTitle = text("连接设置", 18, colorText(), true);
+        TextView accountTitle = text("当前连接", 18, colorText(), true);
         content.addView(accountTitle, matchWrap());
 
-        EditText urlInput = input("服务地址", baseUrl);
-        EditText userInput = input("账号", username);
-        LinearLayout.LayoutParams urlParams = matchWrapWithTop(12);
-        urlParams.height = dp(50);
-        content.addView(urlInput, urlParams);
-        LinearLayout.LayoutParams userParams = matchWrapWithTop(10);
-        userParams.height = dp(50);
-        content.addView(userInput, userParams);
+        LinearLayout connectionCard = new LinearLayout(this);
+        connectionCard.setOrientation(LinearLayout.VERTICAL);
+        connectionCard.setPadding(dp(16), dp(14), dp(16), dp(14));
+        connectionCard.setBackground(roundedBackground(colorSurface(), colorStroke(), 14));
 
-        Button save = primaryButton("保存设置");
-        save.setOnClickListener(v -> {
-            baseUrl = normalizeUrl(urlInput.getText().toString());
-            username = userInput.getText().toString().trim();
-            api = new MomentApi(baseUrl);
-            resetGalleryState();
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putString(KEY_BASE_URL, baseUrl)
-                    .putString(KEY_USER, username)
-                    .apply();
-            loadFavorites();
-            new PullFavoriteAlbumsTask(null).execute();
-            toast("设置已保存");
-            showAlbums(true);
-        });
-        LinearLayout.LayoutParams saveParams = matchWrapWithTop(14);
-        saveParams.height = dp(46);
-        content.addView(save, saveParams);
+        TextView serverLabel = text("服务器", 12, colorMuted(), false);
+        connectionCard.addView(serverLabel, matchWrap());
+        TextView serverValue = text(baseUrl, 15, colorText(), true);
+        serverValue.setSingleLine(true);
+        connectionCard.addView(serverValue, matchWrapWithTop(5));
+
+        String roleLabel = "admin".equals(role) ? "管理员" : "普通用户";
+        TextView identity = text(username + " · " + roleLabel, 13, colorPrimaryDark(), true);
+        connectionCard.addView(identity, matchWrapWithTop(10));
+        TextView changeHint = text("更换服务器或账号需要重新登录，避免旧会话与新地址混用。", 12, colorMuted(), false);
+        connectionCard.addView(changeHint, matchWrapWithTop(6));
+
+        Button changeConnection = secondaryButton("更换服务器或账号");
+        changeConnection.setOnClickListener(v -> showLogin());
+        LinearLayout.LayoutParams changeParams = matchWrapWithTop(12);
+        changeParams.height = dp(44);
+        connectionCard.addView(changeConnection, changeParams);
+        content.addView(connectionCard, matchWrapWithTop(12));
 
         TextView appearanceTitle = text("外观", 18, colorText(), true);
         LinearLayout.LayoutParams appearanceTitleParams = matchWrapWithTop(26);
@@ -489,24 +591,48 @@ public class MainActivity extends ComponentActivity {
         LinearLayout.LayoutParams darkParams = matchWrapWithTop(12);
         content.addView(darkRow, darkParams);
 
-        TextView manageTitle = text("管理", 18, colorText(), true);
-        LinearLayout.LayoutParams manageTitleParams = matchWrapWithTop(26);
-        content.addView(manageTitle, manageTitleParams);
+        if ("admin".equals(role)) {
+            TextView manageTitle = text("管理员中心", 18, colorText(), true);
+            LinearLayout.LayoutParams manageTitleParams = matchWrapWithTop(26);
+            content.addView(manageTitle, manageTitleParams);
 
-        LinearLayout manageRow = new LinearLayout(this);
-        manageRow.setOrientation(LinearLayout.HORIZONTAL);
-        Button accountManage = secondaryButton("账户管理");
-        accountManage.setOnClickListener(v -> {
-            if ("admin".equals(role)) new LoadUsersTask(false, () -> showUserShareManager()).execute();
-            else showUserShareManager();
-        });
-        manageRow.addView(accountManage, new LinearLayout.LayoutParams(0, dp(50), 1));
-        Button dataManage = secondaryButton("数据管理");
-        dataManage.setOnClickListener(v -> showDataManager());
-        LinearLayout.LayoutParams dataManageParams = new LinearLayout.LayoutParams(0, dp(50), 1);
-        dataManageParams.setMargins(dp(10), 0, 0, 0);
-        manageRow.addView(dataManage, dataManageParams);
-        content.addView(manageRow, matchWrapWithTop(12));
+            LinearLayout manageRow = new LinearLayout(this);
+            manageRow.setOrientation(LinearLayout.HORIZONTAL);
+            Button accountManage = secondaryButton("账户与分享");
+            accountManage.setOnClickListener(v ->
+                    new LoadUsersTask(false, () -> showUserShareManager()).execute());
+            manageRow.addView(accountManage, new LinearLayout.LayoutParams(0, dp(50), 1));
+            Button dataManage = secondaryButton("图库与缓存");
+            dataManage.setOnClickListener(v -> showDataManager());
+            LinearLayout.LayoutParams dataManageParams = new LinearLayout.LayoutParams(0, dp(50), 1);
+            dataManageParams.setMargins(dp(10), 0, 0, 0);
+            manageRow.addView(dataManage, dataManageParams);
+            content.addView(manageRow, matchWrapWithTop(12));
+        }
+
+        TextView offlineTitle = text("\u4e0b\u8f7d\u4e0e\u79bb\u7ebf", 18, colorText(), true);
+        content.addView(offlineTitle, matchWrapWithTop(26));
+        Button downloads = secondaryButton("\u67e5\u770b\u4e0b\u8f7d\u961f\u5217\u4e0e\u79bb\u7ebf\u8bb0\u5f55");
+        downloads.setOnClickListener(v -> showDownloads());
+        LinearLayout.LayoutParams downloadsParams = matchWrapWithTop(12);
+        downloadsParams.height = dp(46);
+        content.addView(downloads, downloadsParams);
+
+        TextView version = text("\u7248\u672c " + appVersion(), 12, colorMuted(), false);
+        content.addView(version, matchWrapWithTop(20));
+        Button update = secondaryButton("\u68c0\u67e5 GitHub \u66f4\u65b0");
+        update.setOnClickListener(v -> new CheckUpdateTask().execute());
+        LinearLayout.LayoutParams updateParams = matchWrapWithTop(8);
+        updateParams.height = dp(44);
+        content.addView(update, updateParams);
+
+        TextView shareLinksTitle = text("\u516c\u5f00\u5206\u4eab", 18, colorText(), true);
+        content.addView(shareLinksTitle, matchWrapWithTop(26));
+        Button shareLinks = secondaryButton("\u7ba1\u7406\u5206\u4eab\u94fe\u63a5");
+        shareLinks.setOnClickListener(v -> showPublicShares(true));
+        LinearLayout.LayoutParams shareLinksParams = matchWrapWithTop(12);
+        shareLinksParams.height = dp(46);
+        content.addView(shareLinks, shareLinksParams);
 
         Button logout = secondaryButton("退出登录");
         logout.setTextColor(colorFavorite());
@@ -520,6 +646,7 @@ public class MainActivity extends ComponentActivity {
         content.addView(logout, logoutParams);
 
         page.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        page.addView(bottomNav(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, navigationBarHeight() + dp(72)));
         root.addView(page, fullScreen());
     }
 
@@ -603,6 +730,37 @@ public class MainActivity extends ComponentActivity {
             TextView permissionHint = text("当前账号没有相册库目录和图库来源管理权限。请使用管理员账号进入后再添加来源、启用/禁用来源或执行扫描。", 12, colorMuted(), false);
             permissionHint.setLineSpacing(dp(3), 1f);
             content.addView(permissionHint, matchWrapWithTop(8));
+        }
+
+        if ("admin".equals(role)) {
+            TextView opsTitle = text("\u8fd0\u7ef4\u72b6\u6001", 18, colorText(), true);
+            content.addView(opsTitle, matchWrapWithTop(26));
+            if (systemStatus == null && !loadingSystemStatus && systemStatusError.isEmpty()) {
+                loadingSystemStatus = true;
+                new LoadSystemStatusTask().execute();
+            }
+            String statusText = loadingSystemStatus ? "\u6b63\u5728\u8bfb\u53d6\u540e\u7aef\u72b6\u6001..."
+                    : (systemStatus == null ? "\u65e0\u6cd5\u8bfb\u53d6\uff1a" + systemStatusError : systemStatus.summary());
+            TextView statusView = text(statusText, 13, colorMuted(), false);
+            statusView.setPadding(dp(14), dp(12), dp(14), dp(12));
+            statusView.setLineSpacing(dp(3), 1f);
+            statusView.setBackground(roundedBackground(colorSurface(), colorStroke(), 14));
+            content.addView(statusView, matchWrapWithTop(10));
+
+            LinearLayout opsActions = new LinearLayout(this);
+            Button refreshStatus = secondaryButton("\u5237\u65b0\u72b6\u6001");
+            refreshStatus.setOnClickListener(v -> {
+                systemStatus = null;
+                systemStatusError = "";
+                showDataManager();
+            });
+            opsActions.addView(refreshStatus, new LinearLayout.LayoutParams(0, dp(44), 1));
+            Button prune = secondaryButton("\u6e05\u7406\u540e\u7aef\u65e7\u7f29\u7565\u56fe");
+            prune.setOnClickListener(v -> new PruneServerCacheTask().execute());
+            LinearLayout.LayoutParams pruneParams = new LinearLayout.LayoutParams(0, dp(44), 1);
+            pruneParams.setMargins(dp(8), 0, 0, 0);
+            opsActions.addView(prune, pruneParams);
+            content.addView(opsActions, matchWrapWithTop(10));
         }
 
         TextView localTitle = text("本机数据", 18, colorText(), true);
@@ -962,6 +1120,7 @@ public class MainActivity extends ComponentActivity {
             albumPage = 1;
             albumsHasMore = true;
             albumsLoadedOnce = false;
+            albumLoadError = "";
             albumScrollPosition = 0;
             albumScrollY = 0;
         }
@@ -982,7 +1141,7 @@ public class MainActivity extends ComponentActivity {
         SwipeRefreshLayout refreshLayout = new SwipeRefreshLayout(this);
         refreshLayout.setColorSchemeColors(colorPrimary(), colorPrimaryDark());
         refreshLayout.setProgressBackgroundColorSchemeColor(colorSurface());
-        refreshLayout.setRefreshing(loading);
+        refreshLayout.setRefreshing(loading && albums.isEmpty());
         refreshLayout.setOnRefreshListener(() -> {
             if (loading) return;
             toast("正在刷新");
@@ -1004,6 +1163,13 @@ public class MainActivity extends ComponentActivity {
         });
         recycler.setLayoutManager(layoutManager);
         recycler.setAdapter(adapter);
+        recycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(RecyclerView view, int dx, int dy) {
+                if (dy <= 0) return;
+                maybeLoadMoreAlbums(layoutManager, adapter.getItemCount());
+            }
+        });
         refreshLayout.addView(recycler, new SwipeRefreshLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -1012,7 +1178,10 @@ public class MainActivity extends ComponentActivity {
         page.addView(refreshLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         page.addView(bottomNav(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, navigationBarHeight() + dp(72)));
         root.addView(page, fullScreen());
-        recycler.post(() -> layoutManager.scrollToPositionWithOffset(albumScrollPosition, albumScrollY));
+        recycler.post(() -> {
+            layoutManager.scrollToPositionWithOffset(albumScrollPosition, albumScrollY);
+            recycler.postDelayed(() -> maybeLoadMoreAlbums(layoutManager, adapter.getItemCount()), 180);
+        });
         loadGallerySourcesIfNeeded();
         checkActiveScanTask(false);
 
@@ -1254,6 +1423,7 @@ public class MainActivity extends ComponentActivity {
             assetScrollPosition = 0;
             assetScrollY = 0;
             assets.clear();
+            assetLoadError = "";
             assetPage = 1;
             if (isFavoritesAlbum()) {
                 assets.addAll(favoriteAssets);
@@ -1292,8 +1462,8 @@ public class MainActivity extends ComponentActivity {
                 .setTitle(album.name)
                 .setItems(items, (dialog, which) -> {
                     String action = items[which];
-                    if ("下载相册到本地".equals(action)) showBatchAlbumDownloadUnsupported();
-                    else if ("生成公开分享链接".equals(action)) new CreatePublicShareTask("album", album.id).execute();
+                    if ("下载相册到本地".equals(action)) enqueueAlbumDownload(album);
+                    else if ("生成公开分享链接".equals(action)) showPublicShareOptions("album", album.id);
                     else showShareAlbumDialog(album);
                 })
                 .setNegativeButton("取消", null)
@@ -1302,6 +1472,37 @@ public class MainActivity extends ComponentActivity {
 
     private void showBatchAlbumDownloadUnsupported() {
         showError("暂不支持批量下载相册", "后端 V2 当前没有相册 zip 下载 API，Android 不执行批量下载。请进入相册后下载单张原图。");
+    }
+
+    private void showPublicShareOptions(String type, String targetId) {
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(18), dp(4), dp(18), 0);
+        Spinner expiry = new Spinner(this);
+        String[] labels = {"\u6c38\u4e45", "24 \u5c0f\u65f6", "7 \u5929", "30 \u5929"};
+        int[] hours = {0, 24, 168, 720};
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        expiry.setAdapter(adapter);
+        EditText password = input("\u8bbf\u95ee\u5bc6\u7801\uff08\u53ef\u9009\uff09", "");
+        CheckBox allowOriginal = new CheckBox(this);
+        allowOriginal.setText("\u5141\u8bb8\u4e0b\u8f7d\u539f\u56fe");
+        allowOriginal.setTextColor(colorText());
+        allowOriginal.setChecked(true);
+        form.addView(expiry, inputParams());
+        form.addView(password, inputParams());
+        form.addView(allowOriginal, matchWrapWithTop(8));
+        new AlertDialog.Builder(this)
+                .setTitle("\u521b\u5efa\u516c\u5f00\u5206\u4eab")
+                .setView(form)
+                .setPositiveButton("\u751f\u6210\u94fe\u63a5", (dialog, which) -> {
+                    int selected = Math.max(0, Math.min(expiry.getSelectedItemPosition(), hours.length - 1));
+                    new CreatePublicShareTask(
+                            type, targetId, hours[selected],
+                            password.getText().toString(), allowOriginal.isChecked()).execute();
+                })
+                .setNegativeButton("\u53d6\u6d88", null)
+                .show();
     }
 
     private void showShareAlbumDialog(Album album) {
@@ -1327,7 +1528,8 @@ public class MainActivity extends ComponentActivity {
 
     private Album currentAssetAlbum(Asset asset) {
         if (currentAlbum != null && currentAlbum.id != null && !currentAlbum.id.trim().isEmpty()
-                && !FAVORITES_ALBUM_ID.equals(currentAlbum.id)) {
+                && !FAVORITES_ALBUM_ID.equals(currentAlbum.id)
+                && !TIMELINE_ALBUM_ID.equals(currentAlbum.id)) {
             return currentAlbum;
         }
         if (asset == null || asset.albumId == null || asset.albumId.trim().isEmpty()) return null;
@@ -1362,6 +1564,290 @@ public class MainActivity extends ComponentActivity {
         String user = account.username == null ? "" : account.username.trim();
         String accountRole = account.role == null ? "" : account.role.trim();
         return !user.isEmpty() && "user".equals(accountRole) && !"admin".equals(user);
+    }
+
+    private void showTimeline(boolean reset) {
+        currentScreen = SCREEN_TIMELINE;
+        viewerOpen = false;
+        currentAlbum = null;
+        if (reset) {
+            timelineAssets.clear();
+            timelinePage = 1;
+            timelineHasMore = true;
+            timelineLoadedOnce = false;
+            timelineLoadError = "";
+            timelineScrollPosition = 0;
+            timelineScrollY = 0;
+        }
+        root.removeAllViews();
+        LinearLayout page = basePage();
+        page.addView(timelineHeader());
+
+        RecyclerView recycler = new RecyclerView(this);
+        timelineRecyclerView = recycler;
+        recycler.setClipToPadding(false);
+        recycler.setPadding(dp(8), dp(4), dp(8), dp(18));
+        TimelineAdapter adapter = new TimelineAdapter();
+        GridLayoutManager layout = new GridLayoutManager(this, 3);
+        layout.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+            @Override public int getSpanSize(int position) {
+                return adapter.isFullSpan(position) ? 3 : 1;
+            }
+        });
+        recycler.setLayoutManager(layout);
+        recycler.setAdapter(adapter);
+        recycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrolled(RecyclerView view, int dx, int dy) {
+                if (dy > 0) maybeLoadMoreTimeline(layout, adapter.getItemCount());
+            }
+        });
+        page.addView(recycler, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        page.addView(bottomNav(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, navigationBarHeight() + dp(72)));
+        root.addView(page, fullScreen());
+        recycler.post(() -> {
+            layout.scrollToPositionWithOffset(timelineScrollPosition, timelineScrollY);
+            recycler.postDelayed(() -> maybeLoadMoreTimeline(layout, adapter.getItemCount()), 180);
+        });
+        if (!timelineLoadedOnce && timelineAssets.isEmpty() && !loading) loadTimeline(true);
+    }
+
+    private View timelineHeader() {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(16), statusBarHeight() + dp(12), dp(16), dp(10));
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = text("\u65f6\u95f4\u7ebf", 22, colorText(), true);
+        titleRow.addView(title, new LinearLayout.LayoutParams(0, dp(42), 1));
+        Button filter = secondaryButton("\u7b5b\u9009");
+        filter.setOnClickListener(v -> showTimelineSearchDialog());
+        titleRow.addView(filter, new LinearLayout.LayoutParams(dp(86), dp(40)));
+        wrap.addView(titleRow, matchWrap());
+
+        String filterText = timelineFilterSummary();
+        TextView summary = text(
+                timelineAssets.size() + " \u5f20\u5df2\u52a0\u8f7d" + (filterText.isEmpty() ? "" : "  \u00b7  " + filterText),
+                12, colorMuted(), false);
+        summary.setMaxLines(2);
+        wrap.addView(summary, matchWrapWithTop(6));
+        return wrap;
+    }
+
+    private String timelineFilterSummary() {
+        List<String> parts = new ArrayList<>();
+        if (!timelineKeyword.isEmpty()) parts.add(timelineKeyword);
+        if (!timelineFrom.isEmpty() || !timelineTo.isEmpty()) parts.add(
+                (timelineFrom.isEmpty() ? "..." : timelineFrom) + " ~ " + (timelineTo.isEmpty() ? "..." : timelineTo));
+        if (!timelineOrientation.isEmpty()) parts.add(timelineOrientation);
+        if (!timelineExtension.isEmpty()) parts.add(timelineExtension);
+        return android.text.TextUtils.join("  ", parts);
+    }
+
+    private void showTimelineSearchDialog() {
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(18), dp(4), dp(18), 0);
+        EditText keyword = input("\u56fe\u7247\u540d\u6216\u76f8\u518c\u540d", timelineKeyword);
+        EditText from = input("\u5f00\u59cb\u65e5\u671f YYYY-MM-DD", timelineFrom);
+        EditText to = input("\u7ed3\u675f\u65e5\u671f YYYY-MM-DD", timelineTo);
+        EditText extension = input("\u6269\u5c55\u540d\uff0c\u5982 jpg", timelineExtension);
+        form.addView(keyword, inputParams());
+        form.addView(from, inputParams());
+        form.addView(to, inputParams());
+        form.addView(extension, inputParams());
+
+        Spinner orientation = new Spinner(this);
+        String[] labels = {"\u5168\u90e8\u65b9\u5411", "\u6a2a\u5411", "\u7ad6\u5411", "\u65b9\u5f62"};
+        ArrayAdapter<String> spinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
+        spinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        orientation.setAdapter(spinnerAdapter);
+        int selected = "landscape".equals(timelineOrientation) ? 1
+                : ("portrait".equals(timelineOrientation) ? 2 : ("square".equals(timelineOrientation) ? 3 : 0));
+        orientation.setSelection(selected);
+        form.addView(orientation, inputParams());
+
+        new AlertDialog.Builder(this)
+                .setTitle("\u9ad8\u7ea7\u641c\u7d22")
+                .setView(form)
+                .setPositiveButton("\u5e94\u7528", (dialog, which) -> {
+                    timelineKeyword = keyword.getText().toString().trim();
+                    timelineFrom = normalizeDateInput(from.getText().toString());
+                    timelineTo = normalizeDateInput(to.getText().toString());
+                    timelineExtension = extension.getText().toString().trim().replace(".", "");
+                    int index = orientation.getSelectedItemPosition();
+                    timelineOrientation = index == 1 ? "landscape" : (index == 2 ? "portrait" : (index == 3 ? "square" : ""));
+                    showTimeline(true);
+                })
+                .setNeutralButton("\u91cd\u7f6e", (dialog, which) -> {
+                    timelineKeyword = "";
+                    timelineFrom = "";
+                    timelineTo = "";
+                    timelineExtension = "";
+                    timelineOrientation = "";
+                    showTimeline(true);
+                })
+                .setNegativeButton("\u53d6\u6d88", null)
+                .show();
+    }
+
+    private String normalizeDateInput(String value) {
+        String date = value == null ? "" : value.trim();
+        return date.matches("\\d{4}-\\d{2}-\\d{2}") ? date : "";
+    }
+
+    private String timelineDateBoundary(String date, boolean end) {
+        if (date == null || date.isEmpty()) return "";
+        return date + (end ? "T23:59:59.999Z" : "T00:00:00.000Z");
+    }
+
+    private void saveTimelineScroll() {
+        if (timelineRecyclerView == null || !(timelineRecyclerView.getLayoutManager() instanceof GridLayoutManager)) return;
+        RecyclerView recycler = timelineRecyclerView;
+        GridLayoutManager layout = (GridLayoutManager) recycler.getLayoutManager();
+        timelineScrollPosition = Math.max(0, layout.findFirstVisibleItemPosition());
+        View first = layout.findViewByPosition(timelineScrollPosition);
+        timelineScrollY = first == null ? 0 : first.getTop() - recycler.getPaddingTop();
+    }
+
+    private void maybeLoadMoreTimeline(GridLayoutManager layout, int itemCount) {
+        if (!SCREEN_TIMELINE.equals(currentScreen) || loading || !timelineHasMore || !timelineLoadError.isEmpty()) return;
+        if (layout.findLastVisibleItemPosition() >= Math.max(0, itemCount - 12)) loadTimeline(false);
+    }
+
+    private void loadTimeline(boolean reset) {
+        if (loading) return;
+        loading = true;
+        if (reset) {
+            timelinePage = 1;
+            timelineAssets.clear();
+            timelineHasMore = true;
+            timelineLoadedOnce = false;
+            timelineLoadError = "";
+        }
+        showTimeline(false);
+        new TimelineTask(timelinePage, result -> {
+            loading = false;
+            timelineLoadedOnce = true;
+            if (result == null) {
+                if (timelineLoadError.isEmpty()) timelineLoadError = "timeline request failed";
+            } else {
+                timelineLoadError = "";
+                timelineAssets.addAll(result.items);
+                timelineHasMore = result.hasMore;
+                timelinePage++;
+            }
+            showTimeline(false);
+        }).execute();
+    }
+
+    private List<TimelineEntry> timelineEntries() {
+        List<TimelineEntry> entries = new ArrayList<>();
+        String lastDay = "";
+        for (int i = 0; i < timelineAssets.size(); i++) {
+            Asset asset = timelineAssets.get(i);
+            String day = asset.timelineDay();
+            if (!day.equals(lastDay)) {
+                entries.add(TimelineEntry.header(day));
+                lastDay = day;
+            }
+            entries.add(TimelineEntry.asset(asset, i));
+        }
+        return entries;
+    }
+
+    private View timelineAssetTile(Asset asset, int sourceIndex) {
+        FrameLayout frame = new FrameLayout(this);
+        ImageView image = new ImageView(this);
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image.setBackgroundColor(colorSurfaceTint());
+        imageLoader.loadThumbnail(image, api.absolute(asset.thumbnailUrl), api.cookieHeader);
+        frame.addView(image, fullFrame());
+        TextView meta = text(asset.albumName == null ? "" : asset.albumName, 9, Color.WHITE, true);
+        meta.setSingleLine(true);
+        meta.setPadding(dp(5), 0, dp(5), 0);
+        meta.setBackgroundColor(Color.argb(145, 0, 0, 0));
+        FrameLayout.LayoutParams mp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(22), Gravity.BOTTOM);
+        frame.addView(meta, mp);
+        frame.setOnClickListener(v -> {
+            saveTimelineScroll();
+            Album timelineAlbum = new Album();
+            timelineAlbum.id = TIMELINE_ALBUM_ID;
+            timelineAlbum.name = "\u65f6\u95f4\u7ebf";
+            currentAlbum = timelineAlbum;
+            assets = new ArrayList<>(timelineAssets);
+            showViewer(Math.max(0, Math.min(sourceIndex, assets.size() - 1)));
+        });
+        return frame;
+    }
+
+    private View timelineFooterView() {
+        if (loading) return loadingMoreView("\u6b63\u5728\u8f7d\u5165\u66f4\u591a\u56fe\u7247");
+        if (!timelineLoadError.isEmpty()) return inlineRetryState(
+                timelineAssets.isEmpty() ? "\u65e0\u6cd5\u52a0\u8f7d\u65f6\u95f4\u7ebf" : "\u540e\u7eed\u52a0\u8f7d\u5931\u8d25",
+                friendlyRequestMessage(timelineLoadError), () -> {
+                    timelineLoadError = "";
+                    loadTimeline(timelineAssets.isEmpty());
+                });
+        if (timelineLoadedOnce && timelineAssets.isEmpty()) {
+            return emptyState("\u6ca1\u6709\u5339\u914d\u56fe\u7247", "\u8bf7\u8c03\u6574\u65e5\u671f\u3001\u65b9\u5411\u6216\u5173\u952e\u8bcd\u3002");
+        }
+        return new View(this);
+    }
+
+    private static class TimelineEntry {
+        final String day;
+        final Asset asset;
+        final int sourceIndex;
+        private TimelineEntry(String day, Asset asset, int sourceIndex) {
+            this.day = day;
+            this.asset = asset;
+            this.sourceIndex = sourceIndex;
+        }
+        static TimelineEntry header(String day) { return new TimelineEntry(day, null, -1); }
+        static TimelineEntry asset(Asset asset, int index) { return new TimelineEntry("", asset, index); }
+        boolean isHeader() { return asset == null; }
+    }
+
+    private class TimelineAdapter extends RecyclerView.Adapter<DynamicViewHolder> {
+        private static final int TYPE_HEADER = 1;
+        private static final int TYPE_ASSET = 2;
+        private static final int TYPE_FOOTER = 3;
+        private List<TimelineEntry> entries() { return timelineEntries(); }
+        private boolean hasFooter() { return loading || !timelineLoadError.isEmpty() || (timelineLoadedOnce && timelineAssets.isEmpty()); }
+        @Override public int getItemCount() { return entries().size() + (hasFooter() ? 1 : 0); }
+        @Override public int getItemViewType(int position) {
+            List<TimelineEntry> list = entries();
+            if (position >= list.size()) return TYPE_FOOTER;
+            return list.get(position).isHeader() ? TYPE_HEADER : TYPE_ASSET;
+        }
+        boolean isFullSpan(int position) { return getItemViewType(position) != TYPE_ASSET; }
+        @Override public DynamicViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            FrameLayout container = new FrameLayout(MainActivity.this);
+            int size = (getResources().getDisplayMetrics().widthPixels - dp(28)) / 3;
+            RecyclerView.LayoutParams params = new RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    viewType == TYPE_ASSET ? size : ViewGroup.LayoutParams.WRAP_CONTENT);
+            params.setMargins(dp(3), dp(3), dp(3), dp(3));
+            container.setLayoutParams(params);
+            return new DynamicViewHolder(container);
+        }
+        @Override public void onBindViewHolder(DynamicViewHolder holder, int position) {
+            List<TimelineEntry> list = entries();
+            int type = getItemViewType(position);
+            if (type == TYPE_FOOTER) holder.bind(timelineFooterView(), false);
+            else if (type == TYPE_HEADER) {
+                TextView day = text(list.get(position).day, 17, colorText(), true);
+                day.setPadding(dp(6), dp(12), dp(6), dp(5));
+                holder.bind(day, false);
+            } else {
+                TimelineEntry entry = list.get(position);
+                holder.bind(timelineAssetTile(entry.asset, entry.sourceIndex), true);
+            }
+        }
+        @Override public void onViewRecycled(DynamicViewHolder holder) {
+            imageLoader.clear(holder.container);
+            holder.container.removeAllViews();
+        }
     }
 
     private void showAssets() {
@@ -1409,11 +1895,25 @@ public class MainActivity extends ComponentActivity {
         });
         recycler.setLayoutManager(layoutManager);
         recycler.setAdapter(adapter);
+        recycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(RecyclerView view, int dx, int dy) {
+                int lastVisible = layoutManager.findLastVisibleItemPosition();
+                if (lastVisible >= 0) {
+                    preloadAssetThumbnails(lastVisible + 1, 16);
+                }
+                if (dy <= 0) return;
+                maybeLoadMoreAssets(layoutManager, adapter.getItemCount());
+            }
+        });
         preloadAssetThumbnails(0, 24);
 
         page.addView(recycler, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         root.addView(page, fullScreen());
-        recycler.post(() -> layoutManager.scrollToPositionWithOffset(assetScrollPosition, assetScrollY));
+        recycler.post(() -> {
+            layoutManager.scrollToPositionWithOffset(assetScrollPosition, assetScrollY);
+            recycler.postDelayed(() -> maybeLoadMoreAssets(layoutManager, adapter.getItemCount()), 180);
+        });
 
         if (!isFavoritesAlbum() && !assetsLoadedOnce && assets.isEmpty() && !loading) {
             loadAssets(true);
@@ -1433,12 +1933,94 @@ public class MainActivity extends ComponentActivity {
         return image;
     }
 
+    private void maybeLoadMoreAlbums(GridLayoutManager layoutManager, int itemCount) {
+        if (!SCREEN_ALBUMS.equals(currentScreen)
+                || isFavoritesTag()
+                || loading
+                || !albumsHasMore
+                || !albumLoadError.isEmpty()) return;
+        int lastVisible = layoutManager.findLastVisibleItemPosition();
+        if (lastVisible >= Math.max(0, itemCount - 5)) {
+            loadAlbums(false);
+        }
+    }
+
+    private void maybeLoadMoreAssets(GridLayoutManager layoutManager, int itemCount) {
+        if (!SCREEN_ASSETS.equals(currentScreen)
+                || isFavoritesAlbum()
+                || loading
+                || !assetsHasMore
+                || !assetLoadError.isEmpty()) return;
+        int lastVisible = layoutManager.findLastVisibleItemPosition();
+        if (lastVisible >= Math.max(0, itemCount - 10)) {
+            loadAssets(false);
+        }
+    }
+
+    private View skeletonGrid(int tileCount, int tileHeightDp) {
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        int rows = Math.max(1, (tileCount + 1) / 2);
+        for (int rowIndex = 0; rowIndex < rows; rowIndex++) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            for (int column = 0; column < 2; column++) {
+                View tile = new View(this);
+                tile.setBackground(roundedBackground(colorSurfaceTint(), 0, 12));
+                LinearLayout.LayoutParams tileParams = new LinearLayout.LayoutParams(0, dp(tileHeightDp), 1);
+                tileParams.setMargins(dp(4), dp(4), dp(4), dp(4));
+                row.addView(tile, tileParams);
+            }
+            grid.addView(row, matchWrap());
+        }
+        grid.setAlpha(0.78f);
+        return grid;
+    }
+
+    private View loadingMoreView(String label) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(dp(12), dp(14), dp(12), dp(14));
+        ProgressBar progress = new ProgressBar(this);
+        row.addView(progress, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        TextView copy = text(label, 12, colorMuted(), false);
+        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        copyParams.setMargins(dp(10), 0, 0, 0);
+        row.addView(copy, copyParams);
+        return row;
+    }
+
+    private View inlineRetryState(String title, String message, Runnable retry) {
+        LinearLayout state = new LinearLayout(this);
+        state.setOrientation(LinearLayout.VERTICAL);
+        state.setGravity(Gravity.CENTER);
+        state.setPadding(dp(22), dp(20), dp(22), dp(20));
+        state.setBackground(roundedBackground(colorSurface(), colorStroke(), 14));
+
+        TextView heading = text(title, 16, colorText(), true);
+        heading.setGravity(Gravity.CENTER);
+        state.addView(heading, matchWrap());
+        TextView detail = text(message, 12, colorMuted(), false);
+        detail.setGravity(Gravity.CENTER);
+        state.addView(detail, matchWrapWithTop(7));
+
+        Button button = secondaryButton("重新加载");
+        button.setOnClickListener(v -> retry.run());
+        LinearLayout.LayoutParams buttonParams = matchWrapWithTop(12);
+        buttonParams.height = dp(42);
+        state.addView(button, buttonParams);
+        return state;
+    }
+
     private boolean hasAlbumFooter() {
         return loading
+                || !albumLoadError.isEmpty()
                 || (!isFavoritesTag() && isNewSort() && newAlbumIds.isEmpty())
                 || (isFavoritesTag() && favoriteAssets.isEmpty() && favoriteAlbums.isEmpty())
-                || (albumsLoadedOnce && albums.isEmpty())
-                || albumsHasMore;
+                || (albumsLoadedOnce && albums.isEmpty());
     }
 
     private View albumFooterView() {
@@ -1446,8 +2028,17 @@ public class MainActivity extends ComponentActivity {
         footer.setOrientation(LinearLayout.VERTICAL);
         footer.setPadding(dp(6), dp(8), dp(6), dp(12));
         if (loading) {
-            ProgressBar bar = new ProgressBar(this);
-            footer.addView(bar, centeredParams(dp(44), dp(44)));
+            if (albums.isEmpty()) footer.addView(skeletonGrid(6, 184), matchWrap());
+            else footer.addView(loadingMoreView("正在载入更多相册"), matchWrap());
+        } else if (!albumLoadError.isEmpty()) {
+            footer.addView(inlineRetryState(
+                    albums.isEmpty() ? "无法加载相册" : "后续相册加载失败",
+                    friendlyRequestMessage(albumLoadError),
+                    () -> {
+                        albumLoadError = "";
+                        loadAlbums(albums.isEmpty());
+                    }
+            ));
         } else if (!isFavoritesTag() && isNewSort() && newAlbumIds.isEmpty()) {
             footer.addView(emptyState("本次没有新增或更新", "点击“刷新图库”后，这里只显示本次新增或内容发生变化的相册。"));
         } else if (isFavoritesTag() && favoriteAssets.isEmpty() && favoriteAlbums.isEmpty()) {
@@ -1456,21 +2047,12 @@ public class MainActivity extends ComponentActivity {
             String title = isNewSort() ? "没有匹配的新增或更新内容" : "没找到相册";
             String message = isNewSort() ? "本次新增或更新里没有匹配当前搜索或标签的相册。" : "换个关键词，或者点“全部”看看。";
             footer.addView(emptyState(title, message));
-        } else if (albumsHasMore) {
-            Button more = secondaryButton("加载更多");
-            more.setOnClickListener(v -> {
-                saveAlbumScroll();
-                loadAlbums(false);
-            });
-            LinearLayout.LayoutParams params = matchWrapWithTop(8);
-            params.height = dp(46);
-            footer.addView(more, params);
         }
         return footer;
     }
 
     private boolean hasAssetFooter() {
-        return loading || (assetsLoadedOnce && assets.isEmpty()) || (!isFavoritesAlbum() && assetsHasMore);
+        return loading || !assetLoadError.isEmpty() || (assetsLoadedOnce && assets.isEmpty());
     }
 
     private View assetFooterView() {
@@ -1478,21 +2060,21 @@ public class MainActivity extends ComponentActivity {
         footer.setOrientation(LinearLayout.VERTICAL);
         footer.setPadding(dp(6), dp(8), dp(6), dp(12));
         if (loading) {
-            ProgressBar bar = new ProgressBar(this);
-            footer.addView(bar, centeredParams(dp(44), dp(44)));
+            if (assets.isEmpty()) footer.addView(skeletonGrid(8, 168), matchWrap());
+            else footer.addView(loadingMoreView("正在载入更多图片"), matchWrap());
+        } else if (!assetLoadError.isEmpty()) {
+            footer.addView(inlineRetryState(
+                    assets.isEmpty() ? "无法加载图片" : "后续图片加载失败",
+                    friendlyRequestMessage(assetLoadError),
+                    () -> {
+                        assetLoadError = "";
+                        loadAssets(assets.isEmpty());
+                    }
+            ));
         } else if (assetsLoadedOnce && assets.isEmpty()) {
             String title = isFavoritesAlbum() ? "还没有收藏" : "这个相册暂时没有图片";
             String message = isFavoritesAlbum() ? "在全屏看图时点心型收藏图片。" : "返回相册列表试试其他内容。";
             footer.addView(emptyState(title, message));
-        } else if (!isFavoritesAlbum() && assetsHasMore) {
-            Button more = secondaryButton("加载更多");
-            more.setOnClickListener(v -> {
-                saveAssetScroll();
-                loadAssets(false);
-            });
-            LinearLayout.LayoutParams params = matchWrapWithTop(8);
-            params.height = dp(46);
-            footer.addView(more, params);
         }
         return footer;
     }
@@ -1644,6 +2226,23 @@ public class MainActivity extends ComponentActivity {
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         viewer.addView(image, fullScreen());
 
+        ProgressBar imageLoading = new ProgressBar(this);
+        FrameLayout.LayoutParams imageLoadingParams = new FrameLayout.LayoutParams(dp(46), dp(46), Gravity.CENTER);
+        viewer.addView(imageLoading, imageLoadingParams);
+
+        TextView imageError = text("图片加载失败 · 点击重试", 13, Color.WHITE, true);
+        imageError.setGravity(Gravity.CENTER);
+        imageError.setPadding(dp(16), dp(10), dp(16), dp(10));
+        imageError.setBackground(roundedBackground(Color.argb(176, 28, 28, 28), Color.argb(90, 255, 255, 255), 14));
+        imageError.setVisibility(View.GONE);
+        imageError.setClickable(true);
+        FrameLayout.LayoutParams imageErrorParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER
+        );
+        viewer.addView(imageError, imageErrorParams);
+
         FrameLayout topChrome = new FrameLayout(this);
         View topScrim = new View(this);
         topScrim.setBackground(viewerTopScrimBackground());
@@ -1696,6 +2295,7 @@ public class MainActivity extends ComponentActivity {
         final long[] lastTapTime = {0L};
         final float[] lastTapX = {0f};
         final float[] lastTapY = {0f};
+        final int[] tapGeneration = {0};
         final boolean[] moved = {false};
         final boolean[] multiTouch = {false};
         final boolean[] chromeVisible = {true};
@@ -1746,13 +2346,25 @@ public class MainActivity extends ComponentActivity {
             favorite.setText(isFavorite(asset) ? "♥" : "♡");
             favorite.setTextColor(isFavorite(asset) ? 0xFFFFCCD6 : Color.WHITE);
             resetZoom.run();
-            imageLoader.loadPreviewThenOriginal(image, api.absolute(asset.thumbnailUrl), api.absolute(asset.originalUrl), api.cookieHeader);
+            imageLoading.setVisibility(View.VISIBLE);
+            imageError.setVisibility(View.GONE);
+            imageLoader.loadPreviewThenOriginal(
+                    image,
+                    api.absolute(asset.thumbnailUrl),
+                    api.absolute(asset.originalUrl),
+                    api.cookieHeader,
+                    ok -> {
+                        imageLoading.setVisibility(View.GONE);
+                        imageError.setVisibility(ok ? View.GONE : View.VISIBLE);
+                    }
+            );
             preloadViewerImage(currentAssetIndex - 1);
             preloadViewerImage(currentAssetIndex + 1);
             preloadViewerImage(currentAssetIndex + 2);
             preloadAssetThumbnails(currentAssetIndex + 3, 12);
         };
 
+        imageError.setOnClickListener(v -> render.run());
         Runnable previousAction = () -> {
             if (currentAssetIndex > 0) {
                 currentAssetIndex--;
@@ -1858,28 +2470,46 @@ public class MainActivity extends ComponentActivity {
                     else nextAction.run();
                     return true;
                 }
-                if (!moved[0] && !multiTouch[0] && zoom[0] > minZoom) {
+                if (!moved[0] && !multiTouch[0]) {
                     long now = event.getEventTime();
-                    float tapDx = event.getX() - lastTapX[0];
-                    float tapDy = event.getY() - lastTapY[0];
+                    float tapX = event.getX();
+                    float tapY = event.getY();
+                    float tapDx = tapX - lastTapX[0];
+                    float tapDy = tapY - lastTapY[0];
                     boolean isDoubleTap = now - lastTapTime[0] <= doubleTapTimeout
                             && Math.abs(tapDx) <= doubleTapSlop
                             && Math.abs(tapDy) <= doubleTapSlop;
                     if (isDoubleTap) {
-                        resetZoom.run();
+                        tapGeneration[0]++;
+                        if (zoom[0] <= minZoom) {
+                            zoom[0] = 2.25f;
+                            image.setPivotX(tapX);
+                            image.setPivotY(tapY);
+                            image.setScaleX(zoom[0]);
+                            image.setScaleY(zoom[0]);
+                            clampImagePan.run();
+                        } else {
+                            resetZoom.run();
+                        }
                         lastTapTime[0] = 0L;
-                    } else {
-                        lastTapTime[0] = now;
-                        lastTapX[0] = event.getX();
-                        lastTapY[0] = event.getY();
+                        return true;
                     }
+                    lastTapTime[0] = now;
+                    lastTapX[0] = tapX;
+                    lastTapY[0] = tapY;
+                    int generation = ++tapGeneration[0];
+                    image.postDelayed(() -> {
+                        if (generation != tapGeneration[0]) return;
+                        if (zoom[0] <= minZoom) {
+                            if (tapX <= sideTapWidth) previousAction.run();
+                            else if (tapX >= image.getWidth() - sideTapWidth) nextAction.run();
+                            else toggleChrome.run();
+                        } else {
+                            toggleChrome.run();
+                        }
+                        image.performClick();
+                    }, doubleTapTimeout + 20L);
                     return true;
-                }
-                if (!moved[0] && !multiTouch[0] && zoom[0] <= minZoom) {
-                    if (event.getX() <= sideTapWidth) previousAction.run();
-                    else if (event.getX() >= v.getWidth() - sideTapWidth) nextAction.run();
-                    else toggleChrome.run();
-                    v.performClick();
                 }
                 return true;
             }
@@ -1948,8 +2578,8 @@ public class MainActivity extends ComponentActivity {
                     .setItems(items, (dialog, which) -> {
                         String action = items[which];
                         if ("分享给普通账户".equals(action)) showShareAssetAlbumDialog(asset);
-                        else if ("生成公开分享链接".equals(action)) new CreatePublicShareTask("asset", asset.id).execute();
-                        else new DownloadAssetTask(asset).execute();
+                        else if ("生成公开分享链接".equals(action)) showPublicShareOptions("asset", asset.id);
+                        else enqueueAssetDownload(asset);
                     })
                     .setNegativeButton("取消", null)
                     .show();
@@ -2000,6 +2630,7 @@ public class MainActivity extends ComponentActivity {
             albums.clear();
             albumsHasMore = true;
             albumsLoadedOnce = false;
+            albumLoadError = "";
             albumScrollPosition = 0;
             albumScrollY = 0;
         }
@@ -2017,11 +2648,13 @@ public class MainActivity extends ComponentActivity {
                 loading = false;
                 albumsLoadedOnce = true;
                 if (result != null) {
+                    albumLoadError = "";
                     albums.addAll(result.items);
                     sortAlbums();
                     albumsHasMore = false;
                 } else {
                     albumsHasMore = false;
+                    if (handleSessionExpired(albumLoadError)) return;
                 }
                 showAlbums(false);
             }).execute();
@@ -2030,6 +2663,7 @@ public class MainActivity extends ComponentActivity {
         final int requestedPage = albumPage;
         PageResult<Album> cached = getCachedAlbumPage(requestedPage, keyword, albumSortBy(), albumSortOrder(), activeGalleryPrefix);
         if (cached != null) {
+            albumLoadError = "";
             loading = false;
             albumsLoadedOnce = true;
             albums.addAll(cached.items);
@@ -2043,13 +2677,14 @@ public class MainActivity extends ComponentActivity {
             loading = false;
             albumsLoadedOnce = true;
             if (result != null) {
+                albumLoadError = "";
                 putCachedAlbumPage(requestedPage, keyword, albumSortBy(), albumSortOrder(), activeGalleryPrefix, result);
                 albums.addAll(result.items);
                 sortAlbums();
                 albumsHasMore = result.hasMore;
                 albumPage++;
             } else {
-                albumsHasMore = false;
+                if (handleSessionExpired(albumLoadError)) return;
             }
             showAlbums(false);
         }).execute();
@@ -2077,6 +2712,7 @@ public class MainActivity extends ComponentActivity {
             assets.clear();
             assetsHasMore = true;
             assetsLoadedOnce = false;
+            assetLoadError = "";
             assetScrollPosition = 0;
             assetScrollY = 0;
         }
@@ -2085,11 +2721,15 @@ public class MainActivity extends ComponentActivity {
             loading = false;
             assetsLoadedOnce = true;
             if (result != null) {
+                assetLoadError = "";
                 assets.addAll(result.items);
                 assetsHasMore = result.hasMore;
                 assetPage++;
             } else {
-                assetsHasMore = false;
+                if (handleSessionExpired(assetLoadError)) return;
+                if (after != null) {
+                    toast("后续图片加载失败，可返回九宫格重试");
+                }
             }
             if (after != null) after.run();
             else showAssets();
@@ -2227,7 +2867,8 @@ public class MainActivity extends ComponentActivity {
         incremental.setEnabled(!scanningLibrary);
         MenuItem full = popup.getMenu().add(0, 2, 1, scanningLibrary ? "扫描中..." : "全量刷新");
         full.setEnabled(!scanningLibrary);
-        popup.getMenu().add(0, 3, 2, "我的/设置");
+        popup.getMenu().add(0, 4, 2, "\u672c\u6b21\u65b0\u589e/\u66f4\u65b0");
+        popup.getMenu().add(0, 3, 3, "\u6211\u7684/\u8bbe\u7f6e");
         popup.setOnMenuItemClickListener(item -> {
             int id = item.getItemId();
             if (id == 1) {
@@ -2236,6 +2877,12 @@ public class MainActivity extends ComponentActivity {
             }
             if (id == 2) {
                 refreshLibrary(true);
+                return true;
+            }
+            if (id == 4) {
+                activeTag = TAG_ALL;
+                activeSort = SORT_NEW;
+                showAlbums(true);
                 return true;
             }
             showSettings();
@@ -3061,28 +3708,37 @@ public class MainActivity extends ComponentActivity {
         LinearLayout nav = new LinearLayout(this);
         nav.setOrientation(LinearLayout.HORIZONTAL);
         nav.setGravity(Gravity.CENTER);
-        nav.setPadding(dp(18), dp(6), dp(18), navigationBarHeight() + dp(8));
+        nav.setPadding(dp(10), dp(6), dp(10), navigationBarHeight() + dp(8));
         nav.setBackgroundColor(colorSurface());
 
-        View albums = navItem(ICON_GRID, "相册", !isFavoritesTag());
-        albums.setOnClickListener(v -> {
+        boolean onAlbumHome = SCREEN_ALBUMS.equals(currentScreen) && !isFavoritesTag() && !isNewSort();
+        boolean onTimeline = SCREEN_TIMELINE.equals(currentScreen);
+        boolean onFavorites = SCREEN_ALBUMS.equals(currentScreen) && isFavoritesTag();
+        boolean onProfile = SCREEN_SETTINGS.equals(currentScreen);
+
+        View albumsItem = navItem(ICON_GRID, "相册", onAlbumHome);
+        albumsItem.setOnClickListener(v -> {
             activeTag = TAG_ALL;
             activeSort = SORT_NORMAL;
             showAlbums(true);
         });
-        nav.addView(albums, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+        nav.addView(albumsItem, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
 
-        View favorites = navItem(ICON_HEART, "收藏", isFavoritesTag());
-        favorites.setOnClickListener(v -> {
+        View recentItem = navItem(ICON_CLOCK, "\u65f6\u95f4\u7ebf", onTimeline);
+        recentItem.setOnClickListener(v -> showTimeline(false));
+        nav.addView(recentItem, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+
+        View favoritesItem = navItem(ICON_HEART, "收藏", onFavorites);
+        favoritesItem.setOnClickListener(v -> {
             activeTag = TAG_FAVORITES;
             activeSort = SORT_NORMAL;
             showAlbums(true);
         });
-        nav.addView(favorites, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+        nav.addView(favoritesItem, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
 
-        View profile = navItem(ICON_USER, "我的", false);
-        profile.setOnClickListener(v -> showSettings());
-        nav.addView(profile, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+        View profileItem = navItem(ICON_USER, "我的", onProfile);
+        profileItem.setOnClickListener(v -> showSettings());
+        nav.addView(profileItem, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
         return nav;
     }
 
@@ -3093,6 +3749,10 @@ public class MainActivity extends ComponentActivity {
         item.setFocusable(true);
         item.setClickable(true);
         item.setBackgroundColor(Color.TRANSPARENT);
+        if (active) {
+            item.setBackground(roundedBackground(colorSurfaceTint(), 0, 16));
+        }
+        item.setPadding(dp(4), dp(5), dp(4), dp(4));
 
         int color = active ? colorPrimary() : colorMuted();
         IconView iconView = new IconView(this, icon, color, active && ICON_HEART.equals(icon));
@@ -3259,8 +3919,17 @@ public class MainActivity extends ComponentActivity {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception ignored) {
+            return "unknown";
+        }
+    }
+
     private String normalizeUrl(String input) {
         String value = input == null ? "" : input.trim();
+        if (value.isEmpty()) return "";
         if (value.endsWith("/")) value = value.substring(0, value.length() - 1);
         if (!value.startsWith("http://") && !value.startsWith("https://")) value = "http://" + value;
         return value;
@@ -3273,7 +3942,12 @@ public class MainActivity extends ComponentActivity {
 
     private void handleBackNavigation() {
         if (SCREEN_VIEWER.equals(currentScreen) || viewerOpen) {
-            showAssets();
+            if (currentAlbum != null && TIMELINE_ALBUM_ID.equals(currentAlbum.id)) showTimeline(false);
+            else showAssets();
+            return;
+        }
+        if (SCREEN_TIMELINE.equals(currentScreen)) {
+            showAlbums(false);
             return;
         }
         if (SCREEN_ASSETS.equals(currentScreen) || currentAlbum != null) {
@@ -3293,6 +3967,14 @@ public class MainActivity extends ComponentActivity {
             showSettings();
             return;
         }
+        if (SCREEN_DOWNLOADS.equals(currentScreen)) {
+            showSettings();
+            return;
+        }
+        if (SCREEN_PUBLIC_SHARES.equals(currentScreen)) {
+            showSettings();
+            return;
+        }
         if (SCREEN_SETTINGS.equals(currentScreen)) {
             showAlbums(false);
             return;
@@ -3306,6 +3988,14 @@ public class MainActivity extends ComponentActivity {
             return;
         }
         moveTaskToBack(true);
+    }
+
+    private interface ConnectionCallback {
+        void done(String version, String error);
+    }
+
+    private interface ImageLoadCallback {
+        void done(boolean ok);
     }
 
     private interface BoolCallback {
@@ -3328,7 +4018,107 @@ public class MainActivity extends ComponentActivity {
         void done();
     }
 
-    private class LoadUsersTask extends AsyncTask<Void, Void, List<UserAccount>> {
+    private class CheckUpdateTask extends UiTask<Void, Void, String> {
+        private String error;
+
+        @Override
+        protected String doInBackground(Void... voids) {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(
+                        "https://api.github.com/repos/bigfeng09/MomentPic/releases/latest").openConnection();
+                connection.setConnectTimeout(12000);
+                connection.setReadTimeout(12000);
+                connection.setRequestProperty("Accept", "application/vnd.github+json");
+                connection.setRequestProperty("User-Agent", "MomentPic-Android");
+                BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), "UTF-8"));
+                StringBuilder body = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) body.append(line);
+                reader.close();
+                JSONObject json = new JSONObject(body.toString());
+                return json.optString("tag_name", "latest") + "|" + json.optString(
+                        "html_url", "https://github.com/bigfeng09/MomentPic/releases");
+            } catch (Exception exception) {
+                error = exception.getMessage();
+                return null;
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }
+
+        @Override
+        protected void onPostExecute(String result) {
+            if (result == null) {
+                showError("\u68c0\u67e5\u66f4\u65b0\u5931\u8d25", friendlyRequestMessage(error));
+                return;
+            }
+            String[] values = result.split("\\|", 2);
+            String latest = values[0];
+            String url = values.length > 1 ? values[1] : "https://github.com/bigfeng09/MomentPic/releases";
+            new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("\u7248\u672c\u66f4\u65b0")
+                    .setMessage("\u5f53\u524d\uff1a" + appVersion() + "\n\u6700\u65b0\uff1a" + latest)
+                    .setPositiveButton("\u6253\u5f00 GitHub", (dialog, which) ->
+                            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))))
+                    .setNegativeButton("\u5173\u95ed", null)
+                    .show();
+        }
+    }
+
+    private class LoadSystemStatusTask extends UiTask<Void, Void, SystemStatus> {
+        private String error;
+        @Override protected SystemStatus doInBackground(Void... voids) {
+            try { return api.getSystemStatus(); }
+            catch (Exception exception) { error = exception.getMessage(); return null; }
+        }
+        @Override protected void onPostExecute(SystemStatus result) {
+            loadingSystemStatus = false;
+            systemStatus = result;
+            systemStatusError = result == null ? (error == null ? "request failed" : error) : "";
+            if (SCREEN_DATA_MANAGER.equals(currentScreen)) showDataManager();
+        }
+    }
+
+    private class PruneServerCacheTask extends UiTask<Void, Void, Boolean> {
+        private String error;
+        @Override protected Boolean doInBackground(Void... voids) {
+            try { api.pruneServerCache(); return true; }
+            catch (Exception exception) { error = exception.getMessage(); return false; }
+        }
+        @Override protected void onPostExecute(Boolean ok) {
+            toast(ok ? "\u540e\u7aef\u7f29\u7565\u56fe\u7f13\u5b58\u5df2\u6e05\u7406" : "\u6e05\u7406\u5931\u8d25\uff1a" + friendlyRequestMessage(error));
+            systemStatus = null;
+            systemStatusError = "";
+            if (SCREEN_DATA_MANAGER.equals(currentScreen)) showDataManager();
+        }
+    }
+
+    private class LoadPublicSharesTask extends UiTask<Void, Void, List<PublicShare>> {
+        @Override protected List<PublicShare> doInBackground(Void... voids) {
+            try { return api.getPublicShares(); } catch (Exception ignored) { return null; }
+        }
+        @Override protected void onPostExecute(List<PublicShare> result) {
+            loadingPublicShares = false;
+            publicShares.clear();
+            if (result != null) publicShares.addAll(result);
+            if (SCREEN_PUBLIC_SHARES.equals(currentScreen)) showPublicShares(false);
+        }
+    }
+
+    private class DeletePublicShareTask extends UiTask<Void, Void, Boolean> {
+        private final String token;
+        DeletePublicShareTask(String token) { this.token = token; }
+        @Override protected Boolean doInBackground(Void... voids) {
+            try { api.deletePublicShare(token); return true; } catch (Exception ignored) { return false; }
+        }
+        @Override protected void onPostExecute(Boolean ok) {
+            toast(ok ? "\u5206\u4eab\u5df2\u64a4\u9500" : "\u64a4\u9500\u5931\u8d25");
+            showPublicShares(true);
+        }
+    }
+
+    private class LoadUsersTask extends UiTask<Void, Void, List<UserAccount>> {
         private final boolean showToast;
         private final DoneCallback callback;
         LoadUsersTask(boolean showToast) { this(showToast, null); }
@@ -3386,7 +4176,292 @@ public class MainActivity extends ComponentActivity {
         return true;
     }
 
-    private class DownloadAlbumTask extends AsyncTask<Void, Void, Integer> {
+    private void enqueueAlbumDownload(Album album) {
+        if (album == null || album.id == null || album.id.trim().isEmpty()) return;
+        downloadJobs.add(0, DownloadJob.album(album));
+        saveDownloadJobs();
+        toast("\u5df2\u52a0\u5165\u4e0b\u8f7d\u961f\u5217");
+        runNextDownload();
+    }
+
+    private void enqueueAssetDownload(Asset asset) {
+        if (asset == null || asset.id == null || asset.id.trim().isEmpty()) return;
+        downloadJobs.add(0, DownloadJob.asset(asset));
+        saveDownloadJobs();
+        toast("\u5df2\u52a0\u5165\u4e0b\u8f7d\u961f\u5217");
+        runNextDownload();
+    }
+
+    private void loadDownloadJobs() {
+        downloadJobs.clear();
+        String raw = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_DOWNLOAD_JOBS, "[]");
+        try {
+            JSONArray array = new JSONArray(raw == null ? "[]" : raw);
+            for (int i = 0; i < array.length(); i++) {
+                DownloadJob job = DownloadJob.from(array.optJSONObject(i));
+                if (job != null) {
+                    if ("running".equals(job.status)) job.status = "queued";
+                    downloadJobs.add(job);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void saveDownloadJobs() {
+        JSONArray array = new JSONArray();
+        for (DownloadJob job : downloadJobs) array.put(job.toJson());
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_DOWNLOAD_JOBS, array.toString()).apply();
+    }
+
+    private boolean isWifiConnected() {
+        ConnectivityManager manager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (manager == null) return false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            NetworkCapabilities capabilities = manager.getNetworkCapabilities(manager.getActiveNetwork());
+            return capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+        }
+        android.net.NetworkInfo info = manager.getActiveNetworkInfo();
+        return info != null && info.isConnected() && info.getType() == ConnectivityManager.TYPE_WIFI;
+    }
+
+    private void runNextDownload() {
+        if (downloadQueueRunning || api == null || api.cookieHeader == null || api.cookieHeader.isEmpty()) return;
+        boolean wifiOnly = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_WIFI_ONLY, false);
+        if (wifiOnly && !isWifiConnected()) {
+            for (DownloadJob job : downloadJobs) if ("queued".equals(job.status)) job.status = "waiting_wifi";
+            saveDownloadJobs();
+            return;
+        }
+        DownloadJob next = null;
+        for (DownloadJob job : downloadJobs) {
+            if ("waiting_wifi".equals(job.status) && (!wifiOnly || isWifiConnected())) job.status = "queued";
+            if ("queued".equals(job.status)) { next = job; break; }
+        }
+        if (next == null) return;
+        downloadQueueRunning = true;
+        new DownloadQueueTask(next).execute();
+    }
+
+    private void createDownloadNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager != null) manager.createNotificationChannel(new NotificationChannel(
+                    "momentpic_downloads", "Moment Pic Downloads", NotificationManager.IMPORTANCE_LOW));
+        }
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 3212);
+        }
+    }
+
+    private void notifyDownload(DownloadJob job) {
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return;
+        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(this, "momentpic_downloads") : new Notification.Builder(this);
+        builder.setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle("completed".equals(job.status) ? "Download completed" : "Download failed")
+                .setContentText(job.title + "  " + job.progress + "/" + Math.max(job.total, job.progress))
+                .setAutoCancel(true);
+        manager.notify(Math.abs(job.id.hashCode()), builder.build());
+    }
+
+    private void showDownloads() {
+        currentScreen = SCREEN_DOWNLOADS;
+        viewerOpen = false;
+        root.removeAllViews();
+        LinearLayout page = basePage();
+        page.addView(topBar("\u4e0b\u8f7d\u4e0e\u79bb\u7ebf", this::showSettings, null));
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(18), dp(8), dp(18), navigationBarHeight() + dp(24));
+        scroll.addView(content);
+
+        LinearLayout wifiRow = new LinearLayout(this);
+        wifiRow.setGravity(Gravity.CENTER_VERTICAL);
+        wifiRow.addView(text("\u4ec5 Wi-Fi \u4e0b\u8f7d", 15, colorText(), true), new LinearLayout.LayoutParams(0, dp(48), 1));
+        Switch wifi = new Switch(this);
+        wifi.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_WIFI_ONLY, false));
+        wifi.setOnCheckedChangeListener((buttonView, checked) -> {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_WIFI_ONLY, checked).apply();
+            if (!checked || isWifiConnected()) runNextDownload();
+        });
+        wifiRow.addView(wifi, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)));
+        content.addView(wifiRow, matchWrap());
+
+        if (downloadJobs.isEmpty()) content.addView(emptyState(
+                "\u6682\u65e0\u4e0b\u8f7d\u4efb\u52a1",
+                "\u5728\u76f8\u518c\u83dc\u5355\u6216\u770b\u56fe\u9875\u52a0\u5165\u4e0b\u8f7d\u3002"), matchWrapWithTop(16));
+        for (DownloadJob job : downloadJobs) content.addView(downloadJobRow(job), matchWrapWithTop(10));
+
+        Button clear = secondaryButton("\u6e05\u7406\u5df2\u5b8c\u6210\u8bb0\u5f55");
+        clear.setOnClickListener(v -> {
+            for (int index = downloadJobs.size() - 1; index >= 0; index--) {
+                DownloadJob job = downloadJobs.get(index);
+                if ("completed".equals(job.status) || "cancelled".equals(job.status)) {
+                    downloadJobs.remove(index);
+                }
+            }
+            saveDownloadJobs();
+            showDownloads();
+        });
+        LinearLayout.LayoutParams clearParams = matchWrapWithTop(18);
+        clearParams.height = dp(46);
+        content.addView(clear, clearParams);
+        page.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        root.addView(page, fullScreen());
+        runNextDownload();
+    }
+
+    private void showPublicShares(boolean reload) {
+        currentScreen = SCREEN_PUBLIC_SHARES;
+        viewerOpen = false;
+        if (reload && !loadingPublicShares) {
+            publicShares.clear();
+            loadingPublicShares = true;
+            new LoadPublicSharesTask().execute();
+        }
+        root.removeAllViews();
+        LinearLayout page = basePage();
+        page.addView(topBar("\u516c\u5f00\u5206\u4eab", this::showSettings, null));
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(18), dp(8), dp(18), navigationBarHeight() + dp(24));
+        scroll.addView(content);
+        if (loadingPublicShares) content.addView(loadingMoreView("\u6b63\u5728\u52a0\u8f7d\u5206\u4eab\u94fe\u63a5"), matchWrap());
+        else if (publicShares.isEmpty()) content.addView(emptyState(
+                "\u6682\u65e0\u516c\u5f00\u5206\u4eab",
+                "\u5728\u76f8\u518c\u6216\u56fe\u7247\u83dc\u5355\u4e2d\u521b\u5efa\u94fe\u63a5\u3002"), matchWrap());
+        else for (PublicShare share : publicShares) content.addView(publicShareRow(share), matchWrapWithTop(10));
+        page.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        root.addView(page, fullScreen());
+    }
+
+    private View publicShareRow(PublicShare share) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(14), dp(12), dp(14), dp(12));
+        row.setBackground(roundedBackground(colorSurface(), colorStroke(), 14));
+        row.addView(text(share.type + "  " + share.targetId, 14, colorText(), true), matchWrap());
+        String policy = (share.expiresAt.isEmpty() ? "\u6c38\u4e45" : share.expiresAt)
+                + "  \u00b7  " + (share.passwordProtected ? "\u6709\u5bc6\u7801" : "\u65e0\u5bc6\u7801")
+                + "  \u00b7  " + (share.allowOriginal ? "\u5141\u8bb8\u539f\u56fe" : "\u4ec5\u9884\u89c8");
+        row.addView(text(policy, 12, colorMuted(), false), matchWrapWithTop(6));
+        LinearLayout actions = new LinearLayout(this);
+        Button copy = secondaryButton("\u590d\u5236\u94fe\u63a5");
+        copy.setOnClickListener(v -> copyText("Moment Pic", api.absolute(share.url)));
+        actions.addView(copy, new LinearLayout.LayoutParams(0, dp(40), 1));
+        Button delete = secondaryButton("\u64a4\u9500");
+        delete.setTextColor(colorFavorite());
+        delete.setOnClickListener(v -> new DeletePublicShareTask(share.token).execute());
+        LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(0, dp(40), 1);
+        deleteParams.setMargins(dp(8), 0, 0, 0);
+        actions.addView(delete, deleteParams);
+        row.addView(actions, matchWrapWithTop(10));
+        return row;
+    }
+
+    private View downloadJobRow(DownloadJob job) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(14), dp(12), dp(14), dp(12));
+        row.setBackground(roundedBackground(colorSurface(), colorStroke(), 14));
+        row.addView(text(job.title, 15, colorText(), true), matchWrap());
+        String status = job.status + "  " + job.progress + "/" + Math.max(job.total, job.progress);
+        if (job.error != null && !job.error.isEmpty()) status += "  " + job.error;
+        row.addView(text(status, 12, colorMuted(), false), matchWrapWithTop(6));
+        Button action = secondaryButton("running".equals(job.status) ? "\u6682\u505c"
+                : ("queued".equals(job.status) ? "\u53d6\u6d88"
+                : (("completed".equals(job.status) || "cancelled".equals(job.status)) ? "\u5220\u9664" : "\u7ee7\u7eed")));
+        action.setOnClickListener(v -> {
+            if ("running".equals(job.status)) { job.cancelRequested = true; job.status = "paused"; }
+            else if ("queued".equals(job.status)) job.status = "cancelled";
+            else if ("completed".equals(job.status) || "cancelled".equals(job.status)) downloadJobs.remove(job);
+            else { job.cancelRequested = false; job.error = ""; job.status = "queued"; }
+            saveDownloadJobs();
+            showDownloads();
+        });
+        LinearLayout.LayoutParams actionParams = matchWrapWithTop(10);
+        actionParams.height = dp(40);
+        row.addView(action, actionParams);
+        return row;
+    }
+
+    private class DownloadQueueTask extends UiTask<Void, Void, Boolean> {
+        private final DownloadJob job;
+
+        DownloadQueueTask(DownloadJob job) {
+            this.job = job;
+        }
+
+        @Override
+        protected void onPreExecute() {
+            job.status = "running";
+            job.error = "";
+            saveDownloadJobs();
+        }
+
+        @Override
+        protected Boolean doInBackground(Void... voids) {
+            try {
+                if ("asset".equals(job.type)) {
+                    Asset asset = api.getAsset(job.targetId);
+                    job.total = 1;
+                    if (!job.cancelRequested) {
+                        saveAssetToLocal(asset, job.albumName);
+                        job.progress = 1;
+                    }
+                } else {
+                    int page = 1;
+                    int seen = 0;
+                    while (true) {
+                        if (job.cancelRequested) break;
+                        if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_WIFI_ONLY, false) && !isWifiConnected()) {
+                            job.status = "waiting_wifi";
+                            break;
+                        }
+                        PageResult<Asset> result = api.getAssets(job.targetId, page, 120);
+                        for (Asset asset : result.items) {
+                            if (job.cancelRequested) break;
+                            seen++;
+                            if (seen <= job.progress) continue;
+                            saveAssetToLocal(asset, job.title);
+                            job.progress++;
+                            saveDownloadJobs();
+                        }
+                        if (!result.hasMore || job.cancelRequested) break;
+                        page++;
+                    }
+                    if (!job.cancelRequested && !"waiting_wifi".equals(job.status)) job.total = job.progress;
+                }
+                if (job.cancelRequested) {
+                    if (!"paused".equals(job.status)) job.status = "cancelled";
+                    return false;
+                }
+                if ("waiting_wifi".equals(job.status)) return false;
+                job.status = "completed";
+                return true;
+            } catch (Exception error) {
+                job.status = "failed";
+                job.error = error.getMessage() == null ? "download failed" : error.getMessage();
+                return false;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(Boolean ok) {
+            downloadQueueRunning = false;
+            saveDownloadJobs();
+            if ("completed".equals(job.status) || "failed".equals(job.status)) notifyDownload(job);
+            if (SCREEN_DOWNLOADS.equals(currentScreen)) showDownloads();
+            runNextDownload();
+        }
+    }
+
+    private class DownloadAlbumTask extends UiTask<Void, Void, Integer> {
         private final Album album;
         private String error;
         DownloadAlbumTask(Album album) { this.album = album; }
@@ -3416,7 +4491,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class DownloadAssetTask extends AsyncTask<Void, Void, Boolean> {
+    private class DownloadAssetTask extends UiTask<Void, Void, Boolean> {
         private final Asset asset;
         private String error;
         DownloadAssetTask(Asset asset) { this.asset = asset; }
@@ -3432,18 +4507,29 @@ public class MainActivity extends ComponentActivity {
         @Override protected void onPostExecute(Boolean ok) { toast(ok ? "已下载到相册/Moment Pic" : "下载失败" + (error == null ? "" : ": " + error)); }
     }
 
-    private class CreatePublicShareTask extends AsyncTask<Void, Void, String> {
+    private class CreatePublicShareTask extends UiTask<Void, Void, String> {
         private final String type;
         private final String targetId;
-        CreatePublicShareTask(String type, String targetId) { this.type = type; this.targetId = targetId; }
-        @Override protected String doInBackground(Void... voids) { try { return api.createPublicShare(type, targetId); } catch (Exception ignored) { return null; } }
+        private final int expiresInHours;
+        private final String password;
+        private final boolean allowOriginal;
+        CreatePublicShareTask(String type, String targetId, int expiresInHours, String password, boolean allowOriginal) {
+            this.type = type;
+            this.targetId = targetId;
+            this.expiresInHours = expiresInHours;
+            this.password = password;
+            this.allowOriginal = allowOriginal;
+        }
+        @Override protected String doInBackground(Void... voids) {
+            try { return api.createPublicShare(type, targetId, expiresInHours, password, allowOriginal); } catch (Exception ignored) { return null; }
+        }
         @Override protected void onPostExecute(String url) {
             if (url == null || url.isEmpty()) toast("生成分享链接失败");
             else shareText("Moment Pic 分享链接", url);
         }
     }
 
-    private class LoadSharedAlbumsDetailTask extends AsyncTask<Void, Void, List<Album>> {
+    private class LoadSharedAlbumsDetailTask extends UiTask<Void, Void, List<Album>> {
         private final String targetUser;
         LoadSharedAlbumsDetailTask(String targetUser) { this.targetUser = targetUser; }
         @Override protected List<Album> doInBackground(Void... voids) { try { return api.getSharedAlbumsForUser(targetUser); } catch (Exception ignored) { return null; } }
@@ -3455,7 +4541,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class RemoveSingleShareTask extends AsyncTask<Void, Void, Boolean> {
+    private class RemoveSingleShareTask extends UiTask<Void, Void, Boolean> {
         private final String targetUser;
         private final String albumId;
         private final BoolCallback callback;
@@ -3464,7 +4550,7 @@ public class MainActivity extends ComponentActivity {
         @Override protected void onPostExecute(Boolean ok) { callback.done(ok); }
     }
 
-    private class LoadAlbumSharesTask extends AsyncTask<Void, Void, Map<String, Set<String>>> {
+    private class LoadAlbumSharesTask extends UiTask<Void, Void, Map<String, Set<String>>> {
         private final Album album;
         private final List<String> users = new ArrayList<>();
         LoadAlbumSharesTask(Album album) { this.album = album; }
@@ -3498,7 +4584,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class LoadNormalUsersForAssetShareTask extends AsyncTask<Void, Void, List<UserAccount>> {
+    private class LoadNormalUsersForAssetShareTask extends UiTask<Void, Void, List<UserAccount>> {
         private final Album album;
         private String error;
 
@@ -3546,7 +4632,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class SaveAlbumSharesTask extends AsyncTask<Void, Void, Boolean> {
+    private class SaveAlbumSharesTask extends UiTask<Void, Void, Boolean> {
         private final Album album;
         private final List<String> users;
         private final Set<String> nextSharedUsers;
@@ -3568,7 +4654,7 @@ public class MainActivity extends ComponentActivity {
         @Override protected void onPostExecute(Boolean ok) { callback.done(ok); }
     }
 
-    private class DeleteUserTask extends AsyncTask<Void, Void, Boolean> {
+    private class DeleteUserTask extends UiTask<Void, Void, Boolean> {
         private final String targetUser;
         private final BoolCallback callback;
         DeleteUserTask(String targetUser, BoolCallback callback) { this.targetUser = targetUser; this.callback = callback; }
@@ -3576,7 +4662,7 @@ public class MainActivity extends ComponentActivity {
         @Override protected void onPostExecute(Boolean ok) { callback.done(ok); }
     }
 
-    private class ShareAlbumTask extends AsyncTask<Void, Void, Boolean> {
+    private class ShareAlbumTask extends UiTask<Void, Void, Boolean> {
         private final String targetUser;
         private final Album album;
         private final BoolCallback callback;
@@ -3585,7 +4671,7 @@ public class MainActivity extends ComponentActivity {
         @Override protected void onPostExecute(Boolean ok) { callback.done(ok); }
     }
 
-    private class UpdateUserTask extends AsyncTask<Void, Void, Boolean> {
+    private class UpdateUserTask extends UiTask<Void, Void, Boolean> {
         private final String oldUser;
         private final String nextUser;
         private final String nextPass;
@@ -3595,7 +4681,7 @@ public class MainActivity extends ComponentActivity {
         @Override protected void onPostExecute(Boolean ok) { callback.done(ok); }
     }
 
-    private class SaveUserTask extends AsyncTask<Void, Void, Boolean> {
+    private class SaveUserTask extends UiTask<Void, Void, Boolean> {
         private final String targetUser;
         private final String targetPass;
         private final BoolCallback callback;
@@ -3604,7 +4690,7 @@ public class MainActivity extends ComponentActivity {
         @Override protected void onPostExecute(Boolean ok) { callback.done(ok); }
     }
 
-    private class SaveSharedAlbumsTask extends AsyncTask<Void, Void, Boolean> {
+    private class SaveSharedAlbumsTask extends UiTask<Void, Void, Boolean> {
         private final String targetUser;
         private final String rawIds;
         private final BoolCallback callback;
@@ -3613,7 +4699,7 @@ public class MainActivity extends ComponentActivity {
         @Override protected void onPostExecute(Boolean ok) { callback.done(ok); }
     }
 
-    private class PullFavoriteAlbumsTask extends AsyncTask<Void, Void, List<Album>> {
+    private class PullFavoriteAlbumsTask extends UiTask<Void, Void, List<Album>> {
         private final DoneCallback callback;
 
         PullFavoriteAlbumsTask(DoneCallback callback) {
@@ -3640,7 +4726,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class PushFavoriteAlbumsTask extends AsyncTask<Void, Void, Boolean> {
+    private class PushFavoriteAlbumsTask extends UiTask<Void, Void, Boolean> {
         @Override
         protected Boolean doInBackground(Void... voids) {
             try {
@@ -3652,7 +4738,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class AddGalleryRootTask extends AsyncTask<Void, Void, GallerySource> {
+    private class AddGalleryRootTask extends UiTask<Void, Void, GallerySource> {
         private final String name;
         private final String path;
         private final GalleryRootCallback callback;
@@ -3681,7 +4767,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class GallerySourcesTask extends AsyncTask<Void, Void, List<GallerySource>> {
+    private class GallerySourcesTask extends UiTask<Void, Void, List<GallerySource>> {
         @Override
         protected List<GallerySource> doInBackground(Void... voids) {
             try {
@@ -3714,7 +4800,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class ToggleGallerySourceTask extends AsyncTask<Void, Void, GallerySource> {
+    private class ToggleGallerySourceTask extends UiTask<Void, Void, GallerySource> {
         private final GallerySource source;
         private String error;
 
@@ -3745,7 +4831,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class GalleryScanTask extends AsyncTask<Void, Void, GalleryScanSummary> {
+    private class GalleryScanTask extends UiTask<Void, Void, GalleryScanSummary> {
         private final GallerySource source;
         private final boolean dryRun;
         private final boolean full;
@@ -3806,7 +4892,24 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class LoginTask extends AsyncTask<Void, Void, Boolean> {
+    private void testConnectionAsync(MomentApi candidateApi, ConnectionCallback callback) {
+        new Thread(() -> {
+            String version;
+            String error;
+            try {
+                version = candidateApi.health();
+                error = "";
+            } catch (Exception e) {
+                error = e.getMessage() == null ? "connection failed" : e.getMessage();
+                version = "";
+            }
+            String finalVersion = version;
+            String finalError = error;
+            runOnUiThread(() -> callback.done(finalVersion, finalError));
+        }, "momentpic-connection-test").start();
+    }
+
+    private class LoginTask extends UiTask<Void, Void, Boolean> {
         private final String user;
         private final String pass;
         private final BoolCallback callback;
@@ -3836,7 +4939,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class AlbumsTask extends AsyncTask<Void, Void, PageResult<Album>> {
+    private class AlbumsTask extends UiTask<Void, Void, PageResult<Album>> {
         private final int page;
         private final String keyword;
         private final String sortBy;
@@ -3866,12 +4969,12 @@ public class MainActivity extends ComponentActivity {
 
         @Override
         protected void onPostExecute(PageResult<Album> result) {
-            if (result == null) showError("获取相册失败", error);
+            if (result == null) albumLoadError = error == null ? "request failed" : error;
             callback.done(result);
         }
     }
 
-    private class NewAlbumsTask extends AsyncTask<Void, Void, PageResult<Album>> {
+    private class NewAlbumsTask extends UiTask<Void, Void, PageResult<Album>> {
         private final String keyword;
         private final String sourcePrefix;
         private final String sortBy;
@@ -3899,12 +5002,43 @@ public class MainActivity extends ComponentActivity {
 
         @Override
         protected void onPostExecute(PageResult<Album> result) {
-            if (result == null) showError("获取新增内容失败", error);
+            if (result == null) albumLoadError = error == null ? "request failed" : error;
             callback.done(result);
         }
     }
 
-    private class AssetsTask extends AsyncTask<Void, Void, PageResult<Asset>> {
+    private class TimelineTask extends UiTask<Void, Void, PageResult<Asset>> {
+        private final int page;
+        private final PageCallback<Asset> callback;
+        private String error;
+
+        TimelineTask(int page, PageCallback<Asset> callback) {
+            this.page = page;
+            this.callback = callback;
+        }
+
+        @Override
+        protected PageResult<Asset> doInBackground(Void... voids) {
+            try {
+                return api.searchAssets(
+                        page, ASSET_PAGE_SIZE, timelineKeyword,
+                        timelineDateBoundary(timelineFrom, false),
+                        timelineDateBoundary(timelineTo, true),
+                        timelineExtension, timelineOrientation, activeGalleryPrefix);
+            } catch (Exception e) {
+                error = e.getMessage();
+                return null;
+            }
+        }
+
+        @Override
+        protected void onPostExecute(PageResult<Asset> result) {
+            if (result == null) timelineLoadError = error == null ? "request failed" : error;
+            callback.done(result);
+        }
+    }
+
+    private class AssetsTask extends UiTask<Void, Void, PageResult<Asset>> {
         private final String albumId;
         private final int page;
         private final PageCallback<Asset> callback;
@@ -3928,12 +5062,12 @@ public class MainActivity extends ComponentActivity {
 
         @Override
         protected void onPostExecute(PageResult<Asset> result) {
-            if (result == null) showError("获取图片失败", error);
+            if (result == null) assetLoadError = error == null ? "request failed" : error;
             callback.done(result);
         }
     }
 
-    private class StartScanTask extends AsyncTask<Void, Void, String> {
+    private class StartScanTask extends UiTask<Void, Void, String> {
         private final boolean full;
         private final String galleryId;
         private String snapshot = "{}";
@@ -3969,7 +5103,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class CheckScanTask extends AsyncTask<Void, Void, ScanStatus> {
+    private class CheckScanTask extends UiTask<Void, Void, ScanStatus> {
         private final String taskId;
         private final boolean forceMessage;
         private String error;
@@ -4008,7 +5142,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private class CompleteScanTask extends AsyncTask<Void, Void, ScanResult> {
+    private class CompleteScanTask extends UiTask<Void, Void, ScanResult> {
         private final boolean full;
         private final String galleryId;
         private final String snapshot;
@@ -4058,19 +5192,87 @@ public class MainActivity extends ComponentActivity {
         toast((feature == null || feature.trim().isEmpty() ? "该功能" : feature.trim()) + " v2 暂未支持");
     }
 
+    private boolean isSessionExpiredError(String error) {
+        String value = error == null ? "" : error.toLowerCase(Locale.ROOT);
+        return value.contains("http 401")
+                || value.contains("unauthorized")
+                || value.contains("not authenticated")
+                || value.contains("authentication required")
+                || value.contains("登录状态已过期");
+    }
+
+    private boolean handleSessionExpired(String error) {
+        if (!isSessionExpiredError(error) || SCREEN_LOGIN.equals(currentScreen)) return false;
+        loading = false;
+        albumLoadError = "";
+        assetLoadError = "";
+        if (api != null) api.cookieHeader = "";
+        toast("登录状态已过期，请重新登录");
+        showLogin();
+        return true;
+    }
+
+    private String connectionErrorMessage(String error) {
+        String detail = error == null || error.trim().isEmpty() ? "未知错误" : error.trim();
+        String value = detail.toLowerCase(Locale.ROOT);
+        if (value.contains("timed out") || value.contains("timeout")) {
+            return "连接超时：请确认手机与服务器网络互通，端口没有被防火墙阻止。";
+        }
+        if (value.contains("unable to resolve host")
+                || value.contains("unknownhost")
+                || value.contains("no address associated")) {
+            return "找不到服务器：请检查地址或域名是否填写正确。";
+        }
+        if (value.contains("connection refused")
+                || value.contains("failed to connect")
+                || value.contains("econnrefused")) {
+            return "服务器拒绝连接：请确认 MomentPic 后端已启动并监听当前端口。";
+        }
+        if (value.contains("ssl") || value.contains("certificate") || value.contains("trust anchor")) {
+            return "HTTPS 证书验证失败：请检查证书有效期、域名和手机信任设置。";
+        }
+        if (value.contains("json") || value.contains("unexpected end") || value.contains("end of input")) {
+            return "服务器响应格式不兼容：请确认填写的是 MomentPic V2 后端地址。";
+        }
+        return "连接失败：" + detail;
+    }
+
+    private String friendlyRequestMessage(String error) {
+        if (isSessionExpiredError(error)) return "登录状态已失效，请重新登录。";
+        String value = error == null ? "" : error.toLowerCase(Locale.ROOT);
+        if (value.contains("timed out") || value.contains("timeout")) {
+            return "请求超时，请检查网络后重试。";
+        }
+        if (value.contains("failed to connect")
+                || value.contains("connection refused")
+                || value.contains("unable to resolve host")
+                || value.contains("unknownhost")) {
+            return "无法连接服务器，请确认服务器在线且手机网络可达。";
+        }
+        return error == null || error.trim().isEmpty() ? "请求失败，请稍后重试。" : error.trim();
+    }
+
+    private String loginErrorMessage(String error) {
+        String detail = error == null || error.trim().isEmpty() ? "未知错误" : error.trim();
+        String value = detail.toLowerCase(Locale.ROOT);
+        if (isSessionExpiredError(detail)
+                || value.contains("invalid credentials")
+                || value.contains("invalid username")
+                || value.contains("password")) {
+            return "用户名或密码错误。"
+                    + "\n\n如果管理员密码来自 .env，请注意：数据库中已有管理员时，修改 .env 不会自动重置旧密码。";
+        }
+        return connectionErrorMessage(detail)
+                + "\n\n当前服务地址：" + (baseUrl == null ? "" : baseUrl);
+    }
+
     private void showError(String title, String message) {
+        if (handleSessionExpired(message)) return;
         new AlertDialog.Builder(this)
                 .setTitle(title)
                 .setMessage(message == null ? "未知错误" : message)
                 .setPositiveButton("知道了", null)
                 .show();
-    }
-
-    private String loginErrorMessage(String error) {
-        String detail = error == null || error.trim().isEmpty() ? "未知错误" : error.trim();
-        return detail
-                + "\n\n当前服务地址：" + (baseUrl == null ? "" : baseUrl)
-                + "\n请确认手机能访问这个地址和端口，v2 后端已启动，账号密码已按你的部署配置创建。";
     }
 
     private static class MomentApi {
@@ -4082,6 +5284,22 @@ public class MainActivity extends ComponentActivity {
             this.baseUrl = baseUrl;
         }
 
+        String health() throws Exception {
+            JSONObject payload = data(request("GET", "/api/v2/health", null, 10000));
+            String version = payload.optString("version", "v2");
+            return version == null || version.trim().isEmpty() ? "v2" : version.trim();
+        }
+        SystemStatus getSystemStatus() throws Exception {
+            return SystemStatus.from(data(request("GET", "/api/v2/system/status", null)));
+        }
+
+        void pruneServerCache() throws Exception {
+            JSONObject body = new JSONObject();
+            body.put("dryRun", false);
+            body.put("maxFiles", 0);
+            data(request("POST", "/api/v2/cache/thumbnails/prune", body.toString(), 60000));
+        }
+
         void login(String username, String password) throws Exception {
             JSONObject body = new JSONObject();
             body.put("username", username);
@@ -4091,13 +5309,31 @@ public class MainActivity extends ComponentActivity {
             role = json.optJSONObject("data") == null ? "user" : json.optJSONObject("data").optString("role", "user");
         }
 
-        String createPublicShare(String type, String targetId) throws Exception {
+        String createPublicShare(String type, String targetId, int expiresInHours, String password, boolean allowOriginal) throws Exception {
             JSONObject body = new JSONObject();
             body.put("type", type == null || type.trim().isEmpty() ? "album" : type.trim());
             body.put("targetId", targetId);
+            if (expiresInHours > 0) body.put("expiresInHours", expiresInHours);
+            else body.put("expiresAt", JSONObject.NULL);
+            body.put("password", password == null ? "" : password);
+            body.put("allowOriginal", allowOriginal);
             JSONObject data = data(request("POST", "/api/v2/public-shares", body.toString()));
             String url = data.optString("url");
             return absolute(url);
+        }
+
+        List<PublicShare> getPublicShares() throws Exception {
+            JSONObject data = data(request("GET", "/api/v2/public-shares", null));
+            JSONArray items = data.optJSONArray("items");
+            List<PublicShare> result = new ArrayList<>();
+            if (items != null) {
+                for (int i = 0; i < items.length(); i++) result.add(PublicShare.from(items.optJSONObject(i)));
+            }
+            return result;
+        }
+
+        void deletePublicShare(String token) throws Exception {
+            data(request("DELETE", "/api/v2/public-shares/" + urlEncode(token), null));
         }
 
         List<UserAccount> getUsers() throws Exception {
@@ -4305,6 +5541,35 @@ public class MainActivity extends ComponentActivity {
             return albums;
         }
 
+        PageResult<Asset> searchAssets(
+                int page, int pageSize, String keyword, String from, String to,
+                String extension, String orientation, String galleryId) throws Exception {
+            StringBuilder path = new StringBuilder("/api/v2/assets?page=")
+                    .append(page).append("&pageSize=").append(pageSize)
+                    .append("&includeTotal=false&sortBy=date&sortOrder=desc");
+            if (keyword != null && !keyword.trim().isEmpty()) path.append("&keyword=").append(urlEncode(keyword.trim()));
+            if (from != null && !from.trim().isEmpty()) path.append("&from=").append(urlEncode(from.trim()));
+            if (to != null && !to.trim().isEmpty()) path.append("&to=").append(urlEncode(to.trim()));
+            if (extension != null && !extension.trim().isEmpty()) path.append("&extension=").append(urlEncode(extension.trim()));
+            if (orientation != null && !orientation.trim().isEmpty()) path.append("&orientation=").append(urlEncode(orientation.trim()));
+            if (galleryId != null && !galleryId.trim().isEmpty()) path.append("&galleryId=").append(urlEncode(galleryId.trim()));
+            JSONObject data = data(request("GET", path.toString(), null));
+            JSONArray items = data.getJSONArray("items");
+            List<Asset> result = new ArrayList<>();
+            for (int i = 0; i < items.length(); i++) result.add(Asset.from(items.getJSONObject(i)));
+            JSONObject pagination = data.getJSONObject("pagination");
+            int total = pagination.optInt("total", -1);
+            boolean hasMore = pagination.has("hasMore")
+                    ? pagination.optBoolean("hasMore", false)
+                    : total >= 0 && page * pageSize < total;
+            return new PageResult<>(result, total, hasMore);
+        }
+
+        Asset getAsset(String assetId) throws Exception {
+            JSONObject payload = data(request("GET", "/api/v2/assets/" + urlEncode(assetId), null));
+            return Asset.from(payload);
+        }
+
         PageResult<Asset> getAssets(String albumId, int page, int pageSize) throws Exception {
             JSONObject data = data(request("GET", "/api/v2/albums/" + URLEncoder.encode(albumId, "UTF-8") + "/assets?page=" + page + "&pageSize=" + pageSize + "&includeTotal=false", null));
             JSONArray items = data.getJSONArray("items");
@@ -4430,18 +5695,189 @@ public class MainActivity extends ComponentActivity {
             }
             String setCookie = conn.getHeaderField("Set-Cookie");
             if (setCookie != null && !setCookie.isEmpty()) cookieHeader = setCookie.split(";", 2)[0];
-            InputStream stream = conn.getResponseCode() >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            int responseCode = conn.getResponseCode();
+            InputStream stream = responseCode >= 400 ? conn.getErrorStream() : conn.getInputStream();
             String text = readAll(stream);
             conn.disconnect();
-            return new JSONObject(text);
+            if (text == null || text.trim().isEmpty()) {
+                if (responseCode == 204) {
+                    JSONObject empty = new JSONObject();
+                    empty.put("code", 0);
+                    empty.put("data", new JSONObject());
+                    return empty;
+                }
+                throw new Exception("HTTP " + responseCode + ": empty response");
+            }
+            JSONObject json;
+            try {
+                json = new JSONObject(text);
+            } catch (Exception parseError) {
+                throw new Exception("HTTP " + responseCode + ": invalid JSON response");
+            }
+            if (responseCode >= 400) {
+                String message = json.optString("message", "request failed");
+                throw new Exception("HTTP " + responseCode + ": " + message);
+            }
+            return json;
         }
 
         private String readAll(InputStream stream) throws Exception {
+            if (stream == null) return "";
             BufferedReader reader = new BufferedReader(new InputStreamReader(stream, "UTF-8"));
             StringBuilder builder = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) builder.append(line);
             return builder.toString();
+        }
+    }
+
+    private static class PublicShare {
+        String token;
+        String type;
+        String targetId;
+        String url;
+        String expiresAt;
+        boolean passwordProtected;
+        boolean allowOriginal;
+
+        static PublicShare from(JSONObject json) {
+            PublicShare share = new PublicShare();
+            if (json == null) return share;
+            share.token = json.optString("token");
+            share.type = json.optString("type");
+            share.targetId = json.optString("targetId");
+            share.url = json.optString("url");
+            share.expiresAt = json.optString("expiresAt");
+            share.passwordProtected = json.optBoolean("passwordProtected");
+            share.allowOriginal = json.optBoolean("allowOriginal", true);
+            return share;
+        }
+    }
+
+    private static class SystemStatus {
+        int galleries;
+        int albums;
+        int assets;
+        int users;
+        int publicShares;
+        int cacheFiles;
+        long cacheBytes;
+        long databaseBytes;
+        long diskFreeBytes;
+        String scanStatus = "-";
+
+        static SystemStatus from(JSONObject json) {
+            SystemStatus status = new SystemStatus();
+            JSONObject counts = json.optJSONObject("counts");
+            if (counts != null) {
+                status.galleries = counts.optInt("galleries");
+                status.albums = counts.optInt("albums");
+                status.assets = counts.optInt("assets");
+                status.users = counts.optInt("users");
+                status.publicShares = counts.optInt("publicShares");
+            }
+            JSONObject cache = json.optJSONObject("cacheStatus");
+            if (cache != null) {
+                status.cacheFiles = cache.optInt("files");
+                status.cacheBytes = cache.optLong("bytes");
+            }
+            JSONObject storage = json.optJSONObject("storage");
+            if (storage != null) {
+                status.databaseBytes = storage.optLong("databaseBytes");
+                status.diskFreeBytes = storage.optLong("diskFreeBytes");
+            }
+            JSONObject scan = json.optJSONObject("scan");
+            if (scan != null) status.scanStatus = scan.optString("status", "-");
+            return status;
+        }
+
+        String summary() {
+            return "\u56fe\u5e93 " + galleries + "  \u00b7  \u76f8\u518c " + albums + "  \u00b7  \u56fe\u7247 " + assets
+                    + "\n\u7528\u6237 " + users + "  \u00b7  \u516c\u5f00\u5206\u4eab " + publicShares + "  \u00b7  \u626b\u63cf " + scanStatus
+                    + "\n\u7f29\u7565\u56fe " + cacheFiles + " / " + bytes(cacheBytes)
+                    + "  \u00b7  \u6570\u636e\u5e93 " + bytes(databaseBytes)
+                    + "  \u00b7  \u5269\u4f59 " + bytes(diskFreeBytes);
+        }
+
+        static String bytes(long value) {
+            if (value <= 0) return "-";
+            double size = value;
+            String[] units = {"B", "KB", "MB", "GB", "TB"};
+            int unit = 0;
+            while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+            return String.format(Locale.CHINA, "%.1f %s", size, units[unit]);
+        }
+    }
+
+    private static class DownloadJob {
+        String id;
+        String type;
+        String targetId;
+        String title;
+        String albumName;
+        String status = "queued";
+        String error = "";
+        int progress;
+        int total;
+        long createdAt;
+        boolean cancelRequested;
+
+        static DownloadJob album(Album album) {
+            DownloadJob job = new DownloadJob();
+            job.id = UUID.randomUUID().toString();
+            job.type = "album";
+            job.targetId = album.id;
+            job.title = album.name;
+            job.albumName = album.name;
+            job.total = album.assetCount;
+            job.createdAt = System.currentTimeMillis();
+            return job;
+        }
+
+        static DownloadJob asset(Asset asset) {
+            DownloadJob job = new DownloadJob();
+            job.id = UUID.randomUUID().toString();
+            job.type = "asset";
+            job.targetId = asset.id;
+            job.title = asset.name == null || asset.name.isEmpty() ? asset.id : asset.name;
+            job.albumName = asset.albumName == null ? "" : asset.albumName;
+            job.total = 1;
+            job.createdAt = System.currentTimeMillis();
+            return job;
+        }
+
+        JSONObject toJson() {
+            JSONObject json = new JSONObject();
+            try {
+                json.put("id", id);
+                json.put("type", type);
+                json.put("targetId", targetId);
+                json.put("title", title);
+                json.put("albumName", albumName);
+                json.put("status", status);
+                json.put("error", error);
+                json.put("progress", progress);
+                json.put("total", total);
+                json.put("createdAt", createdAt);
+            } catch (Exception ignored) {
+            }
+            return json;
+        }
+
+        static DownloadJob from(JSONObject json) {
+            if (json == null) return null;
+            DownloadJob job = new DownloadJob();
+            job.id = json.optString("id", UUID.randomUUID().toString());
+            job.type = json.optString("type");
+            job.targetId = json.optString("targetId");
+            job.title = json.optString("title", job.targetId);
+            job.albumName = json.optString("albumName");
+            job.status = json.optString("status", "queued");
+            job.error = json.optString("error");
+            job.progress = json.optInt("progress");
+            job.total = json.optInt("total");
+            job.createdAt = json.optLong("createdAt", System.currentTimeMillis());
+            return job.targetId.isEmpty() ? null : job;
         }
     }
 
@@ -4651,14 +6087,28 @@ public class MainActivity extends ComponentActivity {
         String id;
         String name;
         String albumId;
+        String albumName;
         String thumbnailUrl;
         String originalUrl;
+        String sourceMtime;
+        String createdAt;
+        String extension;
+        int width;
+        int height;
+        long sizeBytes;
 
         static Asset from(JSONObject json) {
             Asset asset = new Asset();
             asset.id = json.optString("id");
             asset.name = json.optString("name");
             asset.albumId = json.optString("albumId");
+            asset.albumName = json.optString("albumName");
+            asset.sourceMtime = Album.firstNonEmpty(json.optString("sourceMtime"), json.optString("updatedAt"), json.optString("createdAt"));
+            asset.createdAt = json.optString("createdAt");
+            asset.extension = json.optString("extension");
+            asset.width = json.optInt("width");
+            asset.height = json.optInt("height");
+            asset.sizeBytes = json.optLong("sizeBytes");
             asset.thumbnailUrl = Album.firstNonEmpty(
                     json.optString("thumbnailUrl"),
                     json.optString("thumbUrl"),
@@ -4674,6 +6124,13 @@ public class MainActivity extends ComponentActivity {
             );
             if (asset.originalUrl.isEmpty()) asset.originalUrl = Album.assetUrl(asset.id, "original");
             return asset;
+        }
+
+        String timelineDay() {
+            String value = sourceMtime == null || sourceMtime.trim().isEmpty() ? createdAt : sourceMtime;
+            if (value == null || value.trim().isEmpty()) return "\u672a\u77e5\u65e5\u671f";
+            value = value.trim();
+            return value.length() >= 10 ? value.substring(0, 10) : value;
         }
     }
 
@@ -4772,6 +6229,14 @@ public class MainActivity extends ComponentActivity {
                         205, 130, false, paint);
                 return;
             }
+            if (ICON_CLOCK.equals(icon)) {
+                float r = size * 0.3f;
+                canvas.drawCircle(cx, cy, r, paint);
+                canvas.drawLine(cx, cy, cx, cy - size * 0.17f, paint);
+                canvas.drawLine(cx, cy, cx + size * 0.14f, cy + size * 0.08f, paint);
+                canvas.drawCircle(cx, cy, Math.max(1.5f, size * 0.035f), paint);
+                return;
+            }
             if (ICON_ZOOM_RESET.equals(icon)) {
                 float r = size * 0.24f;
                 canvas.drawCircle(cx - size * 0.05f, cy - size * 0.05f, r, paint);
@@ -4822,16 +6287,46 @@ public class MainActivity extends ComponentActivity {
                     .into(target);
         }
 
-        void loadPreviewThenOriginal(ImageView target, String thumbnailUrl, String originalUrl, String cookie) {
+        void loadPreviewThenOriginal(
+                ImageView target,
+                String thumbnailUrl,
+                String originalUrl,
+                String cookie,
+                ImageLoadCallback callback
+        ) {
             String source = originalUrl == null || originalUrl.trim().isEmpty() ? thumbnailUrl : originalUrl;
-            if (!prepareTarget(target, source)) return;
-            RequestBuilder<Drawable> full = request(source, cookie).fitCenter();
+            if (!prepareTarget(target, source)) {
+                if (callback != null) callback.done(false);
+                return;
+            }
+            RequestBuilder<Drawable> full = request(source, cookie)
+                    .fitCenter()
+                    .listener(new RequestListener<Drawable>() {
+                        @Override
+                        public boolean onLoadFailed(
+                                GlideException e,
+                                Object model,
+                                Target<Drawable> target,
+                                boolean isFirstResource
+                        ) {
+                            if (callback != null) callback.done(false);
+                            return false;
+                        }
+
+                        @Override
+                        public boolean onResourceReady(
+                                Drawable resource,
+                                Object model,
+                                Target<Drawable> target,
+                                DataSource dataSource,
+                                boolean isFirstResource
+                        ) {
+                            if (callback != null) callback.done(true);
+                            return false;
+                        }
+                    });
             if (thumbnailUrl != null && !thumbnailUrl.trim().isEmpty() && !thumbnailUrl.equals(source)) {
-                full = full.thumbnail(
-                        request(thumbnailUrl, cookie)
-                                .override(dp(720), dp(720))
-                                .fitCenter()
-                );
+                full = full.thumbnail(request(thumbnailUrl, cookie).override(dp(720), dp(720)).fitCenter());
             }
             full.into(target);
         }

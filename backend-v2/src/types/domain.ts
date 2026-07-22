@@ -54,4 +54,5 @@ export interface AssetDto {
   thumbnailKey: string | null;
   createdAt: string;
   updatedAt: string;
+  albumName?: string;
 }

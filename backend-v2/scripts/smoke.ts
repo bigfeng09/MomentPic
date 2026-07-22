@@ -53,6 +53,36 @@ const waitForScanTask = async (
 };
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentpic-v2-smoke-"));
+
+const oldSchemaDbPath = path.join(tempDir, "old-schema.sqlite");
+const oldSchemaDb = new DatabaseSync(oldSchemaDbPath);
+oldSchemaDb.exec(`CREATE TABLE public_shares (
+  token TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);`);
+oldSchemaDb.close();
+const migratedApp = await buildApp({
+  dbPath: oldSchemaDbPath,
+  authSecret: "migration-secret",
+  adminPassword: "migration-password",
+  seedDemoData: false,
+  pathPrefixMap: [],
+  thumbnailCacheDir: path.join(tempDir, "migration-thumbnails"),
+  libraryRootAllowedPrefixes: [tempDir]
+});
+const migratedShareColumns = migratedApp.db.prepare("PRAGMA table_info(public_shares)").all() as Array<{ name: string }>;
+const migratedShareIndexes = migratedApp.db.prepare("PRAGMA index_list(public_shares)").all() as Array<{ name: string }>;
+if (
+  !["expires_at", "password_hash", "allow_original"].every((name) => migratedShareColumns.some((column) => column.name === name)) ||
+  !migratedShareIndexes.some((index) => index.name === "idx_public_shares_expires")
+) {
+  throw new Error("old public_shares schema migration failed");
+}
+await migratedApp.close();
 const legacyPrefix = path.join(tempDir, "legacy-prefix") + path.sep;
 const runtimePrefix = path.join(tempDir, "runtime-prefix") + path.sep;
 
@@ -818,19 +848,53 @@ const publicAssetShare = await app.inject({
   method: "POST",
   url: "/api/v2/public-shares",
   headers: { cookie: authHeader },
-  payload: { type: "asset", targetId: "asset-smoke-file" }
+  payload: { type: "asset", targetId: "asset-smoke-file", password: "share-pass", allowOriginal: false }
 });
 if (publicAssetShare.statusCode !== 200) throw new Error(`public asset share failed: ${publicAssetShare.statusCode} ${publicAssetShare.body}`);
 const publicAssetShareData = JSON.parse(publicAssetShare.body).data as { token: string; url: string };
-const publicAssetPage = await app.inject({ method: "GET", url: publicAssetShareData.url });
-if (publicAssetPage.statusCode !== 200 || !publicAssetPage.body.includes(`/s/${publicAssetShareData.token}/thumbnail`)) {
+const protectedAssetPage = await app.inject({ method: "GET", url: publicAssetShareData.url });
+if (protectedAssetPage.statusCode !== 401 || !protectedAssetPage.body.includes("Protected share")) {
+  throw new Error(`protected share prompt failed: ${protectedAssetPage.statusCode} ${protectedAssetPage.body}`);
+}
+const invalidUnlock = await app.inject({
+  method: "POST",
+  url: `/s/${publicAssetShareData.token}/unlock`,
+  headers: { "content-type": "application/x-www-form-urlencoded" },
+  payload: "password=wrong"
+});
+if (invalidUnlock.statusCode !== 401) throw new Error(`invalid share password should fail: ${invalidUnlock.statusCode}`);
+const validUnlock = await app.inject({
+  method: "POST",
+  url: `/s/${publicAssetShareData.token}/unlock`,
+  headers: { "content-type": "application/x-www-form-urlencoded" },
+  payload: "password=share-pass"
+});
+const shareSetCookie = validUnlock.headers["set-cookie"];
+const shareCookieHeader = (Array.isArray(shareSetCookie) ? shareSetCookie[0] : shareSetCookie)?.split(";")[0] ?? "";
+if (validUnlock.statusCode !== 303 || !shareCookieHeader || validUnlock.headers.location !== publicAssetShareData.url) {
+  throw new Error(`valid share unlock failed: ${validUnlock.statusCode} ${JSON.stringify(validUnlock.headers)}`);
+}
+const publicAssetPage = await app.inject({ method: "GET", url: publicAssetShareData.url, headers: { cookie: shareCookieHeader } });
+if (
+  publicAssetPage.statusCode !== 200 ||
+  !publicAssetPage.body.includes(`/s/${publicAssetShareData.token}/thumbnail`) ||
+  publicAssetPage.body.includes("password=")
+) {
   throw new Error(`public asset page failed: ${publicAssetPage.statusCode} ${publicAssetPage.body}`);
 }
-const publicAssetOriginal = await app.inject({ method: "GET", url: `/s/${publicAssetShareData.token}/original` });
-if (publicAssetOriginal.statusCode !== 200 || publicAssetOriginal.headers["content-type"] !== "image/jpeg") {
-  throw new Error(`public asset original failed: ${publicAssetOriginal.statusCode} ${publicAssetOriginal.body}`);
+const publicAssetOriginal = await app.inject({
+  method: "GET",
+  url: `/s/${publicAssetShareData.token}/original`,
+  headers: { cookie: shareCookieHeader }
+});
+if (publicAssetOriginal.statusCode !== 403) {
+  throw new Error(`disabled public original should fail: ${publicAssetOriginal.statusCode} ${publicAssetOriginal.body}`);
 }
-const publicAssetThumbnail = await app.inject({ method: "GET", url: `/s/${publicAssetShareData.token}/thumbnail` });
+const publicAssetThumbnail = await app.inject({
+  method: "GET",
+  url: `/s/${publicAssetShareData.token}/thumbnail`,
+  headers: { cookie: shareCookieHeader }
+});
 if (publicAssetThumbnail.statusCode !== 200 || publicAssetThumbnail.headers["x-momentpic-thumbnail-cache"] !== "hit") {
   throw new Error(
     `public asset thumbnail failed: ${publicAssetThumbnail.statusCode} ${String(publicAssetThumbnail.headers["x-momentpic-thumbnail-cache"])}`
